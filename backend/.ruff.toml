@@ -1,0 +1,45 @@
+# transVideo Backend — Python Lint Rules
+# Impeccable v1.0.0 · 2026-07-14
+# Run: ruff check backend/ script/ understanding/ processing/ generation/
+
+[tool.ruff]
+target-version = "py311"
+line-length = 100
+
+[tool.ruff.format]
+quote-style = "double"
+indent-style = "space"
+docstring-code-format = true
+
+[tool.ruff.lint]
+select = [
+    # Core errors — always catch
+    "E",      # pycodestyle errors
+    "F",      # pyflakes (unused imports, undefined names)
+    "I",      # isort (import ordering)
+    "W",      # pycodestyle warnings
+
+    # Modern Python
+    "UP",     # pyupgrade (use modern syntax)
+
+    # Code quality
+    "B",      # flake8-bugbear (common bugs)
+    "SIM",    # flake8-simplify (unnecessary complexity)
+    "C4",     # flake8-comprehensions (unnecessary list/dict/set comprehensions)
+
+    # Documentation
+    "D",      # pydocstyle (docstring conventions)
+]
+
+[tool.ruff.lint.pydocstyle]
+convention = "google"
+
+[tool.ruff.lint.isort]
+known-first-party = ["backend", "script", "understanding", "generation", "processing"]
+force-sort-within-sections = true
+
+[tool.ruff.lint.per-file-ignores]
+# Allow magic values in signal processing (video/audio constants)
+"understanding/signal/*.py" = ["D100", "D104"]
+# Init files don't need docstrings
+"__init__.py" = ["D100", "D104"]
