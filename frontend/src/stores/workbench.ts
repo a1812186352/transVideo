@@ -45,7 +45,8 @@ export const useWorkbenchStore = defineStore('workbench', () => {
     { value: 'news',     label: '新闻资讯' },
     { value: 'comedy',   label: '搞笑娱乐' },
     { value: 'film',     label: '影视剪辑' },
-    { value: 'other',    label: '其他类型' },
+    { value: 'commercial', label: '商业广告' },
+    { value: 'other',      label: '其他类型' },
   ];
 
   /* ═══════════════════════════════════
