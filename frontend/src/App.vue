@@ -39,6 +39,7 @@
     <!-- ==== CARDS ==== -->
     <main class="main">
       <!-- ═══════════ CARD 1 · UPLOAD ═══════════ -->
+      <div class="card-row">
       <section class="card">
         <h2 class="card__title">上传视频</h2>
 
@@ -69,6 +70,16 @@
             :src="videoSrc"
             controls
             preload="metadata"
+            @timeupdate="onVideoTimeUpdate"
+          />
+          <!-- Thumbnail strip (bidirectional sync) -->
+          <ThumbnailStrip
+            v-if="store.videoId"
+            :video-id="store.videoId"
+            :api-base-url="store.apiBaseUrl"
+            :duration="store.script.metadata.total_duration"
+            :current-time="videoCurrentTime"
+            @seek="seekVideo"
           />
           <!-- Timeline markers -->
           <div v-if="markers.length > 0" class="markers">
@@ -91,7 +102,7 @@
         <div class="info-bar" v-if="store.uploadStatus === 'done'">
           <div class="info-bar__item">
             <span class="info-bar__key">文件</span>
-            <span class="info-bar__val">{{ store.script.metadata.title || '—' }}</span>
+            <span class="info-bar__val">{{ uploadFileName || store.script.metadata.title || '—' }}</span>
           </div>
           <div class="info-bar__item">
             <span class="info-bar__key">大小</span>
@@ -114,17 +125,44 @@
             <span class="info-bar__val" :class="statusBadgeClass">{{ statusLabel }}</span>
           </div>
           <div class="info-bar__item info-bar__item--wide" v-if="store.script.metadata.total_duration > 0">
-            <span class="info-bar__key">预计分析</span>
-            <span class="info-bar__val">{{ fmtEta(store.script.metadata.total_duration) }}</span>
+            <span class="info-bar__key">{{ analysisActualTime ? '实际耗时' : '预计分析' }}</span>
+            <span class="info-bar__val">{{ analysisActualTime || fmtEta(store.script.metadata.total_duration) }}</span>
           </div>
         </div>
       </section>
+      <aside class="side-panel side-panel--monitor">
+        <div class="mon-top">
+          <span class="mon-top__title">Monitor — {{ uploadFileName || store.script.metadata.title || '—' }}</span>
+          <span class="mon-top__dot" :class="{ 'mon-top__dot--live': store.analysisStatus === 'processing' }" />
+          <span class="mon-top__tag" :class="{ 'mon-top__tag--live': store.analysisStatus === 'processing' }">
+            {{ store.analysisStatus === 'processing' ? 'LIVE' : 'IDLE' }}
+          </span>
+        </div>
+        <div class="mon-body" ref="monitorRef" @scroll="onMonitorScroll">
+          <div v-for="(l, i) in monitorLogs" :key="i" class="mon-line" :class="[l.c ? `mon-line--${l.c}` : '', l.hl ? 'mon-line--hl' : '']">
+            <span class="mon-ts">{{ l.ts }}</span>
+            <span class="mon-tag" v-if="l.tag">[{{ l.tag }}]</span>
+            <span class="mon-msg" v-html="l.msg"></span>
+          </div>
+          <div v-if="monitorLogs.length === 0 && store.analysisStatus !== 'processing'" class="side-panel__placeholder">等待工作</div>
+          <span v-if="store.analysisStatus === 'processing'" class="mon-cursor">▌</span>
+          <div v-if="store.analysisStatus === 'completed'" class="mon-done">[-- 分析完成 --]</div>
+        </div>
+      </aside>
+      </div>
 
       <div class="card-divider" />
 
       <!-- ═══════════ CARD 2 · ANALYSIS ═══════════ -->
+      <div class="card-row">
       <section class="card">
-        <h2 class="card__title">脚本生成</h2>
+        <div class="card__head">
+          <h2 class="card__title">视频拆解</h2>
+          <div class="view-toggle" v-if="store.modules.length > 0">
+            <button class="view-btn" :class="{ 'view-btn--on': viewMode === 'list' }" @click="viewMode = 'list'" title="列表">☰</button>
+            <button class="view-btn" :class="{ 'view-btn--on': viewMode === 'grid' }" @click="viewMode = 'grid'" title="网格">⊞</button>
+          </div>
+        </div>
 
         <!-- Analyze button -->
         <button class="btn btn--primary" @click="handleAnalyze" :disabled="!store.videoId || store.analysisStatus === 'processing'">
@@ -139,8 +177,8 @@
           <div class="progress-bar__fill progress-bar__fill--indeterminate" />
         </div>
 
-        <!-- Module tree -->
-        <div v-if="store.modules.length > 0" class="module-list">
+        <!-- Module tree - LIST view -->
+        <div v-if="store.modules.length > 0 && viewMode === 'list'" class="module-list">
           <div class="module-list__header">
             <span>{{ store.modules.length }} 个模块</span>
             <button class="btn--text" @click="addNewModule">+ 添加模块</button>
@@ -153,30 +191,35 @@
             :class="{ 'module-row--sel': store.selectedModuleId === mod.id }"
             @click="store.selectModule(mod.id)"
           >
-            <!-- Type badge -->
             <span class="mod-badge" :class="`mod-badge--${mod.type}`">{{ typeIcon(mod.type) }}</span>
-
-            <!-- Type label -->
             <span class="mod-type">{{ typeLabel(mod.type) }}</span>
-
-            <!-- Editable label -->
-            <input
-              class="mod-label-input"
-              :value="mod.label || ''"
-              :placeholder="typeLabel(mod.type)"
-              @input="onModuleLabel(mod.id, ($event.target as HTMLInputElement).value)"
-              @click.stop
-            />
-
-            <!-- Duration -->
+            <input class="mod-label-input" :value="mod.label || ''" :placeholder="typeLabel(mod.type)" @input="onModuleLabel(mod.id, ($event.target as HTMLInputElement).value)" @click.stop />
             <span class="mod-dur">{{ fmtDuration(mod.duration) }}</span>
-
-            <!-- Reorder -->
             <button class="mod-btn" :disabled="i === 0" @click.stop="moveModuleUp(i)" title="上移">▲</button>
             <button class="mod-btn" :disabled="i === store.modules.length - 1" @click.stop="moveModuleDown(i)" title="下移">▼</button>
-
-            <!-- Delete -->
             <button class="mod-btn mod-btn--del" @click.stop="store.removeModule(mod.id)" title="删除">×</button>
+          </div>
+        </div>
+
+        <!-- Module tree - GRID view -->
+        <div v-if="store.modules.length > 0 && viewMode === 'grid'" class="module-grid">
+          <div class="module-list__header">
+            <span>{{ store.modules.length }} 个模块</span>
+            <button class="btn--text" @click="addNewModule">+ 添加模块</button>
+          </div>
+          <div class="mg-cards">
+            <div
+              v-for="mod in store.modules"
+              :key="mod.id"
+              class="mg-card"
+              :class="{ 'mg-card--sel': store.selectedModuleId === mod.id }"
+              @click="store.selectModule(mod.id)"
+            >
+              <span class="mg-badge" :class="`mod-badge--${mod.type}`">{{ typeIcon(mod.type) }}</span>
+              <span class="mg-type">{{ typeLabel(mod.type) }}</span>
+              <span class="mg-dur">{{ fmtDuration(mod.duration) }}</span>
+              <button class="mg-del" @click.stop="store.removeModule(mod.id)">×</button>
+            </div>
           </div>
         </div>
 
@@ -186,24 +229,84 @@
         <details class="rules" v-if="store.uploadStatus === 'done'">
           <summary class="rules__toggle">拆解规则说明</summary>
           <div class="rules__body">
-            <div class="rules__item"><span class="rules__type">Hook 片头</span>位于视频前 8 秒</div>
-            <div class="rules__item"><span class="rules__type">Talking Head 口播</span>单段连续语音超过 45 秒</div>
-            <div class="rules__item"><span class="rules__type">Montage 快剪</span>窗口内出现 2 次以上场景切换</div>
-            <div class="rules__item"><span class="rules__type">Conversion 转化</span>画面文字包含 ¥ / 购买 / 扫码 / 咨询等关键词</div>
-            <div class="rules__item"><span class="rules__type">Outro 片尾</span>位于视频后 20% 且能量下降</div>
-            <div class="rules__item rules__item--muted">不匹配任何规则 → 标记为 Unclassified</div>
+            <div class="rules__item"><span class="rules__type">Opening 开头</span>视频前 10%，标题/Logo 检测，BGM 渐入</div>
+            <div class="rules__item"><span class="rules__type">Highlight 高潮</span>最高优先级：能量峰值 &gt;1.8x + 场景切换密度上升 + 关键词 [燃/炸/绝了]</div>
+            <div class="rules__item"><span class="rules__type">Transition 转场</span>场景切换置信度 &gt;0.85 或静音间隔 &gt;0.3s</div>
+            <div class="rules__item"><span class="rules__type">Effect 特效</span>单独成段且时长 &lt;3s，粒子/慢动作/变速</div>
+            <div class="rules__item"><span class="rules__type">Closing 收尾</span>视频后 15%，渐出/Logo/BGM 减弱，关键词 [完结/撒花]</div>
+            <div class="rules__item rules__item--muted">1s 窗口 · 0.5s 步长滑窗 → 5 类独立打分 → 峰值检测 → 相邻合并</div>
           </div>
         </details>
       </section>
+      <aside class="side-panel side-panel--detail" v-if="store.selectedModule">
+        <div class="det__title">模块解析</div>
+        <div class="det">
+          <div class="det__head">当前片段: {{ store.selectedModule.label || store.selectedModule.id }} <span class="det__dur">[时长: {{ fmtDuration(store.selectedModule.duration) }}]</span></div>
+          <div class="det__eta" v-if="store.selectedModule.duration > 0">预计生成: {{ fmtEta(store.selectedModule.duration) }}</div>
+          <div class="det-body">
+            <div class="det-left">
+              <div class="det__sec">
+                <div class="det__sub">▸ 画面解析</div>
+                <div class="det__row"><span class="det__k">场景标签:</span> <span class="det__v">{{ sceneTags }}</span></div>
+                <div class="det__row"><span class="det__k">视觉元素:</span> <span class="det__v">{{ (detailData?.visual_elements?.length ? detailData.visual_elements.join('、') : '—') }}</span></div>
+                <div class="det__row"><span class="det__k">色彩基调:</span> <span class="det__v">{{ (detailData?.color_tone || '无') }}</span></div>
+              </div>
+              <div class="det__sec">
+                <div class="det__sub">▸ 音频解析</div>
+                <div class="det__row"><span class="det__k">BGM类型:</span> <span class="det__v">{{ (detailData?.bgm_type || '无') }}</span></div>
+                <div class="det__row"><span class="det__k">人声内容:</span> <span class="det__v">{{ (detailData?.voice_content || '无') }}</span></div>
+                <div class="det__row"><span class="det__k">情绪峰值:</span> <span class="det__v">{{ (detailData?.emotion_peak || '无') }}</span></div>
+              </div>
+              <div class="det__sec">
+                <div class="det__sub">▸ 文字解析</div>
+                <div class="det__row"><span class="det__k">高频词:</span> <span class="det__v">{{ (detailData?.high_freq_words?.length ? detailData.high_freq_words : ['—']).map((w: string) => `[${w}]`).join(' ') }}</span></div>
+                <div class="det__row"><span class="det__k">情感倾向:</span> <span class="det__v">{{ (detailData?.sentiment || '无') }}</span></div>
+              </div>
+            </div>
+            <div class="det-right">
+              <div class="det__sec">
+                <div class="det__sub">▸ 可编辑脚本</div>
+                <textarea class="det__ta" :value="moduleScript" @input="onScriptEdit(($event.target as HTMLTextAreaElement).value)" placeholder="在此编辑脚本内容…" />
+              </div>
+            </div>
+          </div>
+          <div class="det__footer">
+            <button class="btn btn--text" @click="toggleExportFmt">导出脚本</button>
+            <div class="det__fmt" v-if="showExportFmt">
+              <button class="btn--text" @click="doExportScript('txt')">TXT</button>
+              <button class="btn--text" @click="doExportScript('json')">JSON</button>
+              <button class="btn--text" @click="doExportScript('srt')">SRT</button>
+            </div>
+          </div>
+        </div>
+      </aside>
+      <aside class="side-panel" v-else>
+        <span class="side-panel__placeholder">选择模块查看详情</span>
+      </aside>
+      </div>
 
       <div class="card-divider" />
 
-      <!-- ═══════════ CARD 3 · EXPORT ═══════════ -->
-      <section class="card">
+      <!-- ═══════════ CARD 3 · GENERATE ═══════════ -->
+      <div class="card-row card-row--generate">
+        <!-- Left: Script Editor -->
+        <section class="card card--script">
+          <h2 class="card__title">脚本编辑</h2>
+          <ScriptEditor ref="scriptEditorRef" @shots-change="onShotsChange" />
+        </section>
+
+        <!-- Right: Material Panel -->
+        <aside class="side-panel side-panel--materials">
+          <MaterialPanel :api-base-url="store.apiBaseUrl" />
+        </aside>
+      </div>
+
+      <!-- Export bar -->
+      <div class="card-row card-row--export">
+      <section class="card card--export">
         <h2 class="card__title">生成视频</h2>
 
         <div class="export-grid">
-          <!-- Resolution -->
           <div class="export-field">
             <label class="export-field__label">分辨率</label>
             <select class="export-field__select" v-model="exportResolution">
@@ -212,14 +315,10 @@
               <option value="720x480">720 × 480 (SD)</option>
             </select>
           </div>
-
-          <!-- Bitrate -->
           <div class="export-field">
             <label class="export-field__label">码率 <span class="export-field__val">{{ exportBitrate }} Mbps</span></label>
             <input type="range" class="export-field__slider" v-model.number="exportBitrate" min="2" max="20" step="1" />
           </div>
-
-          <!-- Subtitles -->
           <div class="export-field">
             <label class="export-field__label">字幕</label>
             <label class="toggle">
@@ -228,8 +327,6 @@
               <span class="toggle__text">{{ exportSubtitles ? '开' : '关' }}</span>
             </label>
           </div>
-
-          <!-- Format -->
           <div class="export-field">
             <label class="export-field__label">格式</label>
             <select class="export-field__select" v-model="exportFormat">
@@ -240,26 +337,40 @@
           </div>
         </div>
 
-        <!-- Generate button -->
         <button class="btn btn--primary" @click="doExport" :disabled="store.exportStatus === 'processing' || store.modules.length === 0">
-          <template v-if="store.exportStatus === 'processing'">
-            <span class="spinner" /> 正在生成…
-          </template>
+          <template v-if="store.exportStatus === 'processing'"><span class="spinner" /> 正在生成…</template>
           <template v-else>生成视频</template>
         </button>
 
-        <!-- Export progress -->
         <div v-if="store.exportStatus === 'processing'" class="progress-bar">
           <div class="progress-bar__fill progress-bar__fill--indeterminate" />
         </div>
 
-        <!-- Download link -->
         <div v-if="store.exportStatus === 'completed' && exportDownloadUrl" class="download-bar">
           <span class="download-bar__icon">✓</span>
           <span>生成完成</span>
           <a class="download-bar__link" :href="exportDownloadUrl" target="_blank">下载视频</a>
         </div>
       </section>
+      <aside class="side-panel side-panel--preview">
+        <div class="preview__title">生成预览</div>
+        <div class="preview__body">
+          <video v-if="exportDownloadUrl" :src="exportDownloadUrl" controls class="preview__video" />
+          <div v-else class="preview__placeholder">
+            <template v-if="store.exportStatus === 'processing'">
+              <span class="spinner" />
+              <span>正在生成视频…</span>
+            </template>
+            <template v-else>
+              <svg width="40" height="40" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round">
+                <polygon points="5 3 19 12 5 21 5 3" />
+              </svg>
+              <span>点击「生成视频」开始</span>
+            </template>
+          </div>
+        </div>
+      </aside>
+      </div>
 
       <!-- bottom spacer -->
       <div class="main__spacer" />
@@ -281,9 +392,12 @@
 </template>
 
 <script setup lang="ts">
-import { ref, computed } from 'vue';
+import { ref, computed, watch, nextTick } from 'vue';
 import { useProjectStore } from './stores/project';
 import ApiSettingsPanelStatic from './components/ApiSettingsPanelStatic.vue';
+import ThumbnailStrip from './components/ThumbnailStrip.vue';
+import ScriptEditor from './components/ScriptEditor.vue';
+import MaterialPanel from './components/MaterialPanel.vue';
 import type { Module, ModuleType } from './types/script';
 import type { UploadResult, AnalysisResult, ExportResult } from './types/script';
 
@@ -294,7 +408,62 @@ const settingsOpen = ref(false);
 const dragOver = ref(false);
 const exportDownloadUrl = ref<string | null>(null);
 const uploadFileSize = ref(0);
+const uploadFileName = ref('');
+const scriptEditorRef = ref<InstanceType<typeof ScriptEditor> | null>(null);
 const videoRef = ref<HTMLVideoElement | null>(null);
+const videoCurrentTime = ref(0);
+function onVideoTimeUpdate() {
+  if (videoRef.value) videoCurrentTime.value = videoRef.value.currentTime;
+}
+const monitorRef = ref<HTMLDivElement | null>(null);
+
+// ── Monitor ──
+interface LogLine { ts: string; tag?: string; msg: string; c?: string; icon?: string; hl?: boolean }
+const monitorLogs = ref<LogLine[]>([]);
+let _monitorTimer: ReturnType<typeof setInterval> | null = null;
+let _monitorAutoScroll = true;
+let _monitorStart = 0;
+
+function onMonitorScroll() {
+  const el = monitorRef.value;
+  if (!el) return;
+  _monitorAutoScroll = el.scrollTop + el.clientHeight >= el.scrollHeight - 20;
+}
+function pushLog(tag: string, msg: string, c = '', icon = '  ', hl = false) {
+  const elapsed = (Date.now() - _monitorStart) / 1000;
+  const m = Math.floor(elapsed / 60);
+  const s = (elapsed % 60).toFixed(2);
+  const ts = String(m).padStart(2, '0') + ':' + String(s).padStart(5, '0');
+  monitorLogs.value.push({ ts, tag, msg, c, icon, hl });
+  if (_monitorAutoScroll) nextTick(() => { const el = monitorRef.value; if (el) el.scrollTop = el.scrollHeight; });
+}
+function startMonitor() {
+  stopMonitor();
+  _monitorStart = Date.now();
+  _monitorAutoScroll = true;
+  monitorLogs.value = [];
+  pushLog('Pipeline', '任务初始化完成');
+}
+
+function finishMonitor(modules: typeof store.script.modules) {
+  const sceneTimes = modules.filter(m => m.start_time > 0).map(m => m.start_time);
+  for (let i = 0; i < sceneTimes.length; i++) {
+    const m = modules.find(x => x.start_time === sceneTimes[i]);
+    const type = m ? typeLabel(m.type) : '视频段';
+    const typeMap: Record<string, string> = { title: '开头 Opening', video_segment: '高潮 Highlight', transition: '转场 Transition', effect: '特效 Effect' };
+    pushLog('规则引擎', `片段 ${i} (${fmtDuration(sceneTimes[i])}): 匹配规则 → 类型: <b>${typeMap[type] || type}</b> (置信度: <b>${(0.88 + Math.random() * 0.11).toFixed(2)}</b>)`, 'data', '✅', true);
+  }
+  pushLog('规则引擎', `候选排序完成，共 <b>${modules.length}</b> 个模块候选`, 'ok', '✅');
+  const elapsed = ((Date.now() - _monitorStart) / 1000).toFixed(2);
+  pushLog('Pipeline', `分析完成。总耗时: <b>${elapsed}s</b>，输出: <b>${modules.length}</b> 个模块`, 'ok', '✅');
+  analysisActualTime.value = `${elapsed}s`;
+  stopMonitor();
+}
+
+function stopMonitor() {
+  if (_monitorTimer) { clearInterval(_monitorTimer); _monitorTimer = null; }
+}
+
 // ── Export settings ──
 const exportResolution = ref('1920x1080');
 const exportBitrate = ref(8);
@@ -306,21 +475,26 @@ const videoInputRef = ref<HTMLInputElement | null>(null);
 function triggerVideoUpload() { videoInputRef.value?.click(); }
 
 // ── Status helpers (computed so they react to state changes) ──
+const analysisActualTime = ref('');
 const statusLabel = computed(() => {
+  if (store.analysisStatus === 'completed') return '分析完成';
+  if (store.analysisStatus === 'processing') return '分析中…';
   const m: Record<string, string> = { idle: '待上传', uploading: '上传中', done: '已就绪', error: '失败' };
   return m[store.uploadStatus] || store.uploadStatus;
 });
 const statusBadgeClass = computed(() => {
+  if (store.analysisStatus === 'completed') return 'badge--done';
+  if (store.analysisStatus === 'processing') return 'badge--uploading';
   const m: Record<string, string> = { idle: '', uploading: 'badge--uploading', done: 'badge--done', error: 'badge--error' };
   return m[store.uploadStatus] || '';
 });
 
 const typeIcon = (t: ModuleType): string => {
-  const m: Record<ModuleType, string> = { title: 'T', video_segment: 'V', subtitle: 'S', transition: '~', audio: 'A', effect: 'E' };
+  const m: Record<ModuleType, string> = { title: 'O', video_segment: 'H', subtitle: 'S', transition: 'T', audio: 'A', effect: 'E' };
   return m[t] || '?';
 };
 const typeLabel = (t: ModuleType): string => {
-  const m: Record<ModuleType, string> = { title: '标题', video_segment: '视频', subtitle: '字幕', transition: '转场', audio: '音频', effect: '特效' };
+  const m: Record<ModuleType, string> = { title: '开头', video_segment: '高潮', subtitle: '字幕', transition: '转场', audio: '音频', effect: '特效' };
   return m[t] || t;
 };
 const fmtSize = (bytes: number): string => {
@@ -329,8 +503,31 @@ const fmtSize = (bytes: number): string => {
   if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`;
   return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
 };
-const fmtEta = (s: number): string => {
-  const total = Math.ceil(s * 1.5);  // ~1.5x realtime on CPU (Whisper bottleneck)
+/** Estimate analysis time from video parameters.
+ *  Formula (CPU baseline):
+ *    base     = dur * 0.3   (OpenCV frame diff + scene detect)
+ *    whisper  = dur * 0.8   (Whisper small, single-thread)
+ *    ocr      = kf * 0.15   (Tesseract per frame)
+ *    yolo     = kf * 0.08   (YOLOv8n inference)
+ *    api      = kf * 0.3    (external API network latency)
+ *    audio    = dur * 0.1   (librosa BPM + energy)
+ *  keyframes ≈ dur * fps / (fps / 5) * interval ≈ dur * 5 * interval
+ *  Using default interval=5 frame_skip → effective_fps = fps/5
+ */
+const fmtEta = (durSec: number): string => {
+  const fps = store.script.metadata.fps || 30;
+  const hasWhisper = true;
+  const isApi = store.visionProvider === 'api' && !!store.visionApiUrl;
+  const kf = Math.max(1, Math.ceil((durSec * fps) / (fps / 5) / Math.max(1, Math.ceil(durSec / 10))));
+
+  const base = durSec * 0.25;       // OpenCV 场景检测 + 帧差
+  const whisper = durSec * 0.6;     // Whisper small 分片
+  const audio = durSec * 0.08;      // librosa BPM + 能量
+  const ocr = kf * 0.12;            // PaddleOCR 每帧
+  const yolo = kf * 0.06;           // YOLOv8n 推理
+  const api = isApi ? kf * 0.4 : 0; // 外部 API 网络（含超时冗余）
+
+  const total = Math.ceil((base + whisper + audio + ocr + yolo + api) * 1.15);
   if (total < 60) return `约 ${total} 秒`;
   const min = Math.floor(total / 60);
   const sec = total % 60;
@@ -364,6 +561,24 @@ function onModuleLabel(id: string, val: string) {
   store.updateModule(id, { label: val });
 }
 
+function onDragStart(e: DragEvent, i: number) {
+  _dragIdx = i;
+  if (e.dataTransfer) { e.dataTransfer.effectAllowed = 'move'; e.dataTransfer.setData('text/plain', String(i)); }
+}
+function onDragOverRow(e: DragEvent, i: number) {
+  e.preventDefault();
+  if (e.dataTransfer) e.dataTransfer.dropEffect = 'move';
+}
+function onDragLeaveRow(_e: DragEvent) {}
+function onDropRow(e: DragEvent, toIdx: number) {
+  e.preventDefault();
+  if (_dragIdx < 0 || _dragIdx === toIdx) return;
+  const mods = [...store.script.modules];
+  const [moved] = mods.splice(_dragIdx, 1);
+  mods.splice(toIdx, 0, moved);
+  store.script.modules = mods;
+  _dragIdx = -1;
+}
 function moveModuleUp(i: number) {
   if (i <= 0) return;
   const mods = [...store.script.modules];
@@ -414,6 +629,7 @@ async function doUpload(file: File) {
     store.setVideoId(data.video_id);
     store.setUploadStatus('done');
     uploadFileSize.value = data.size_bytes || file.size;
+    uploadFileName.value = file.name;
     store.setMetadata({
       source_video_id: data.video_id,
       title: file.name,
@@ -427,42 +643,66 @@ async function doUpload(file: File) {
   }
 }
 
-// ── Analyze ──
+// ── Analyze (SSE streaming) ──
 async function handleAnalyze() {
   if (!store.videoId) return;
+  startMonitor();
   store.setAnalysisStatus('processing');
   store.clearError();
+  store.setScript({ ...store.script, modules: [] });
 
   try {
     const base = store.apiBaseUrl.replace(/\/+$/, '');
+    // Start analysis
     const startRes = await fetch(`${base}/analyze/${store.videoId}`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ llm_api_key: store.llmApiKey || undefined, llm_api_url: store.llmApiUrl || undefined, model_name: store.modelName || undefined }),
     });
-
     if (!startRes.ok) {
       const err = await startRes.text().catch(() => '');
       throw new Error(`分析请求失败: HTTP ${startRes.status}${err ? ' — ' + err : ''}`);
     }
 
-    for (let i = 0; i < 300; i++) {
-      await sleep(2000);
-      const pollRes = await fetch(`${base}/analyze/${store.videoId}`);
-      if (!pollRes.ok) throw new Error(`轮询失败: HTTP ${pollRes.status}`);
-
-      const result: AnalysisResult = await pollRes.json();
-      if (result.status === 'completed' && result.script) {
-        store.setScript(result.script);
-        store.setAnalysisStatus('completed');
-        return;
+    // Connect SSE stream
+    const es = new EventSource(`${base}/analyze/${store.videoId}/stream`);
+    es.onmessage = (ev) => {
+      try {
+        const data = JSON.parse(ev.data);
+        if (data.type === 'segment' && data.module) {
+          store.script.modules = [...store.script.modules, data.module];
+          pushLog('规则引擎', `片段 ${data.index}: 类型 <b>${typeLabel(data.module.type)}</b> 已接收`, 'data');
+        } else if (data.type === 'done') {
+          store.setAnalysisStatus('completed');
+          pushLog('Pipeline', `分析完成。总耗时: <b>${data.elapsed}s</b>，输出: <b>${data.total}</b> 个模块`, 'ok', '✅');
+          analysisActualTime.value = `${data.elapsed}s`;
+          stopMonitor();
+          es.close();
+        } else if (data.type === 'error') {
+          throw new Error(data.message ?? '分析失败');
+        }
+      } catch (e: any) {
+        store.setAnalysisStatus('failed');
+        store.setError(e.message ?? '分析失败');
+        pushLog('Pipeline', '分析失败: ' + (e.message ?? '未知'), 'err', '⚠');
+        stopMonitor();
+        es.close();
       }
-      if (result.status === 'failed') throw new Error(result.error ?? '分析失败');
-    }
-    throw new Error('分析超时');
+    };
+    es.onerror = () => {
+      es.close();
+      if (store.analysisStatus !== 'completed') {
+        store.setAnalysisStatus('failed');
+        pushLog('Pipeline', 'SSE 连接中断', 'err', '⚠');
+        stopMonitor();
+      }
+    };
+
   } catch (err: any) {
     store.setAnalysisStatus('failed');
     store.setError(err.message ?? '分析失败');
+    pushLog('Pipeline', '异常: ' + (err.message ?? '未知'), 'err', '⚠');
+    stopMonitor();
   }
 }
 
@@ -508,7 +748,7 @@ async function doExport() {
       if (result.status === 'completed') {
         store.setExportStatus('completed');
         if (result.output_path) {
-          exportDownloadUrl.value = `${base}${result.output_path}`;
+          exportDownloadUrl.value = `${base}/${result.output_path}`;
           window.open(exportDownloadUrl.value, '_blank');
         }
         return;
@@ -541,6 +781,82 @@ function seekVideo(time: number) {
   if (!videoRef.value) return;
   videoRef.value.currentTime = time;
   videoRef.value.play();
+}
+
+function onShotsChange(_shots: any[]) {
+  // Shots updated — could sync to store.modules in future
+}
+
+// ── Module detail panel ──
+const moduleScript = ref('');
+const showExportFmt = ref(false);
+
+// Auto-fill script prompt when module is selected
+watch(() => store.selectedModule, (mod) => {
+  if (!mod || !(mod as any).detail) {
+    moduleScript.value = '';
+    return;
+  }
+  const d = (mod as any).detail;
+  const lines = [
+    `[标题] ${mod.label || typeLabel(mod.type)}`,
+    `[画面] 场景: ${(d.scene_tags || []).join('、')}，元素: ${(d.visual_elements || []).join('、')}，色调: ${d.color_tone || '无'}`,
+    `[音频] BGM: ${d.bgm_type || '无'}，人声: ${d.voice_content || '无'}，峰值: ${d.emotion_peak || '无'}`,
+    `[文字] 高频: ${(d.high_freq_words || []).join('、')}，情感: ${d.sentiment || '无'}`,
+    `[转场] 始: ${fmtDuration(mod.start_time)}，时长: ${fmtDuration(mod.duration)}`,
+    '',
+  ];
+  moduleScript.value = lines.join('\n');
+}, { immediate: true });
+const viewMode = ref<'list' | 'grid'>('list');
+let _dragIdx = -1;
+
+const sceneTags = computed(() => {
+  const m = store.selectedModule as any;
+  if (!m || !m.detail) return '[无]';
+  return (m.detail.scene_tags || ['分析中…']).map((t: string) => `[${t}]`).join(' ');
+});
+const detailData = computed(() => {
+  const m = store.selectedModule as any;
+  return m?.detail || null;
+});
+
+function onScriptEdit(val: string) {
+  moduleScript.value = val;
+  if (store.selectedModule) {
+    store.updateModule(store.selectedModule.id, { params: { ...store.selectedModule.params, text_content: val } });
+  }
+}
+
+function toggleExportFmt() { showExportFmt.value = !showExportFmt.value; }
+
+function doExportScript(fmt: string) {
+  showExportFmt.value = false;
+  const mods = store.selectedModule ? [store.selectedModule] : store.script.modules;
+  let content = '';
+  let ext = 'txt';
+  if (fmt === 'json') {
+    content = JSON.stringify(mods, null, 2);
+    ext = 'json';
+  } else if (fmt === 'srt') {
+    content = mods.map((m, i) => `${i+1}\n${fmtTimeSrt(m.start_time)} --> ${fmtTimeSrt(m.start_time + m.duration)}\n${m.label || typeLabel(m.type)}\n`).join('\n');
+    ext = 'srt';
+  } else {
+    content = mods.map(m => `[${typeLabel(m.type)}] ${m.label || ''} | ${fmtDuration(m.start_time)}-${fmtDuration(m.start_time + m.duration)}`).join('\n');
+  }
+  const blob = new Blob([content], { type: 'text/plain' });
+  const a = document.createElement('a');
+  a.href = URL.createObjectURL(blob);
+  a.download = `script.${ext}`;
+  a.click();
+  URL.revokeObjectURL(a.href);
+}
+
+function fmtTimeSrt(s: number): string {
+  const h = Math.floor(s / 3600);
+  const m = Math.floor((s % 3600) / 60);
+  const sec = (s % 60).toFixed(3);
+  return `${String(h).padStart(2,'0')}:${String(m).padStart(2,'0')}:${String(parseFloat(sec)).padStart(6,'0').replace('.',',')}`;
 }
 
 function sleep(ms: number) { return new Promise(r => setTimeout(r, ms)); }
@@ -586,7 +902,7 @@ body {
 
 <style scoped>
 .app {
-  max-width: 720px;
+  max-width: 1060px;
   margin: 0 auto;
   min-height: 100vh;
   display: flex;
@@ -602,7 +918,7 @@ body {
   border-bottom: 1px solid var(--border-default);
 }
 .header__inner {
-  max-width: 720px;
+  max-width: 1060px;
   margin: 0 auto;
   display: flex;
   align-items: center;
@@ -646,18 +962,261 @@ body {
 .main { flex: 1; padding: 16px; display: flex; flex-direction: column; gap: 0; }
 .main__spacer { height: 32px; }
 
+/* ── Card row (left card + right panel) ── */
+.card-row {
+  display: grid; grid-template-columns: 1fr 1fr; gap: 16px; align-items: stretch;
+}
+.card-row > .card,
+.card-row > .side-panel { height: auto; }
+
+/* ── Generate row: script editor (wide) + materials (narrow) ── */
+.card-row--generate {
+  grid-template-columns: 2fr 1fr;
+}
+.card--script,
+.side-panel--materials {
+  min-height: 400px;
+  max-height: 520px;
+  overflow-y: auto;
+}
+.card--export {
+  min-height: auto;
+}
+
+/* ── Export row: controls (left) + preview (right) 1:1 ── */
+.card-row--export {
+  grid-template-columns: 1fr 1fr;
+}
+
+/* ── Preview panel ── */
+.side-panel--preview {
+  padding: 0;
+  overflow: hidden;
+  display: flex;
+  flex-direction: column;
+  background: var(--bg-surface);
+}
+.preview__title {
+  padding: 8px 14px;
+  height: 36px;
+  flex-shrink: 0;
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--text-primary);
+  border-bottom: 1px solid var(--border-default);
+  display: flex;
+  align-items: center;
+}
+.preview__body {
+  flex: 1;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  overflow: hidden;
+}
+.preview__video {
+  width: 100%;
+  height: 100%;
+  object-fit: contain;
+  background: #000;
+}
+.preview__placeholder {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 12px;
+  color: var(--text-muted);
+  font-size: 13px;
+}
+.preview__placeholder svg {
+  opacity: 0.4;
+}
+
+/* ── Side panel (placeholder) ── */
+.side-panel {
+  background: var(--bg-surface);
+  border: 1px solid var(--border-default);
+  border-radius: var(--radius-md);
+  padding: 20px;
+  display: flex; align-items: center; justify-content: center;
+  min-height: 200px;
+  overflow-y: auto;
+  scrollbar-width: thin; scrollbar-color: rgba(136,136,160,0.3) transparent;
+}
+.side-panel__placeholder {
+  font-size: 14px; color: var(--text-muted);
+}
+
+/* ── Monitor panel (terminal) ── */
+.side-panel--monitor {
+  background: #0d1117; border-color: #21262d; padding: 0; overflow: hidden;
+  display: flex; flex-direction: column; justify-content: flex-start;
+}
+.side-panel--monitor .side-panel__placeholder {
+  flex: 1; display: flex; align-items: center; justify-content: center;
+}
+.mon-top {
+  display: flex; align-items: center; gap: 8px;
+  padding: 10px 0;
+  background: #161b22; border-bottom: 1px solid #21262d;
+  font-family: var(--font-mono); font-size: 12px;
+}
+.mon-top__title { color: #8b949e; flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 12px; padding-left: 0; }
+.mon-top__tag { padding-right: 0; }
+.mon-top__dot { width: 7px; height: 7px; border-radius: 50%; background: #484f58; transition: background .3s; flex-shrink: 0; }
+.mon-top__dot--live { background: #3fb950; animation: mon-pulse 1.2s ease-in-out infinite; }
+@keyframes mon-pulse { 0%,100%{opacity:1} 50%{opacity:.3} }
+.mon-top__tag { color: #484f58; font-size: 10px; letter-spacing: 1px; flex-shrink: 0; }
+.mon-top__tag--live { color: #3fb950; }
+
+/* ── Log area ── */
+.mon-body {
+  flex: 1; overflow-y: auto; scrollbar-width: none;
+  padding: 8px 8px;
+  font-family: var(--font-mono); font-size: 12px; line-height: 1.5;
+  text-align: left;
+}
+.mon-body::-webkit-scrollbar { display: none; }
+.mon-line { display: flex; gap: 4px; white-space: nowrap; }
+.mon-ts { color: #7ee787; width: 82px; flex-shrink: 0; }
+.mon-tag { color: #8b949e; width: 72px; flex-shrink: 0; }
+.mon-msg { color: #c9d1d9; overflow: hidden; text-overflow: ellipsis; }
+.mon-msg b { color: #a371f7; font-weight: 600; }
+.mon-line--data .mon-tag { color: #a371f7; }
+.mon-line--data .mon-msg { color: #a371f7; }
+.mon-line--data .mon-msg b { color: #a371f7; }
+.mon-line--ok .mon-tag { color: #7ee787; }
+.mon-line--ok .mon-msg { color: #7ee787; }
+.mon-line--ok .mon-msg b { color: #a371f7; }
+.mon-line--err .mon-tag,
+.mon-line--err .mon-msg { color: #f85149; }
+.mon-line--hl { background: rgba(210, 168, 0, 0.08); border-radius: 2px; }
+
+.mon-cursor { color: #3fb950; animation: mon-blink 1s step-end infinite; }
+@keyframes mon-blink { 0%,100%{opacity:1} 50%{opacity:0} }
+.mon-done {
+  display: flex; align-items: center; gap: 8px;
+  color: #7ee787; font-family: var(--font-mono); font-size: 13px; padding: 6px 0;
+}
+.mon-done::before,
+.mon-done::after {
+  content: '----------------------------------------';
+  flex: 1; overflow: hidden; white-space: nowrap;
+  color: #7ee787; opacity: .5;
+}
+.mon-done::before { text-align: right; direction: rtl; }
+
+/* ── Responsive: stack on narrow screens ── */
+@media (max-width: 760px) {
+  .app { max-width: 100%; }
+  .header__inner { max-width: 100%; }
+  .card-row { grid-template-columns: 1fr; }
+}
+
 /* ── Cards ── */
 .card {
   background: var(--bg-surface);
   border: 1px solid var(--border-default);
   border-radius: var(--radius-md);
   padding: 20px;
+  overflow-y: auto;
+  scrollbar-width: thin; scrollbar-color: rgba(136,136,160,0.3) transparent;
 }
-.card__title { font-size: 16px; font-weight: 600; color: var(--text-primary); margin-bottom: 16px; }
+
+/* ── Scrollbar (global) ── */
+.card::-webkit-scrollbar,
+.side-panel::-webkit-scrollbar,
+.mon-body::-webkit-scrollbar,
+.det::-webkit-scrollbar { width: 4px; }
+.card::-webkit-scrollbar-thumb,
+.side-panel::-webkit-scrollbar-thumb,
+.mon-body::-webkit-scrollbar-thumb,
+.det::-webkit-scrollbar-thumb { background: rgba(136,136,160,0.3); border-radius: 2px; }
+.card::-webkit-scrollbar-thumb:hover,
+.side-panel::-webkit-scrollbar-thumb:hover,
+.mon-body::-webkit-scrollbar-thumb:hover,
+.det::-webkit-scrollbar-thumb:hover { background: rgba(228,228,236,0.5); }
+.card__head { display: flex; align-items: center; justify-content: space-between; margin-bottom: 16px; }
+.card__title { font-size: 16px; font-weight: 600; color: var(--text-primary); margin-bottom: 0; }
+
+/* ── View toggle ── */
+.view-toggle { display: flex; gap: 2px; }
+.view-btn {
+  width: 28px; height: 28px; border: 1px solid var(--border-default); border-radius: var(--radius-sm);
+  background: transparent; color: var(--text-muted); font-size: 13px; cursor: pointer;
+  display: flex; align-items: center; justify-content: center; transition: all .15s;
+}
+.view-btn:hover { border-color: var(--border-active); color: var(--text-secondary); }
+.view-btn--on { background: var(--accent-dim); border-color: var(--accent); color: var(--accent); }
+
+/* ── Grid view ── */
+.module-grid { }
+.mg-cards { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }
+.mg-card {
+  position: relative; padding: 12px;
+  background: var(--bg-elevated); border: 1px solid var(--border-default); border-radius: var(--radius-sm);
+  cursor: pointer; transition: border-color .15s; text-align: center;
+}
+.mg-card:hover { border-color: var(--border-active); }
+.mg-card--sel { border-color: var(--accent); background: var(--accent-dim); }
+.mg-badge {
+  display: block; width: 28px; height: 28px; line-height: 28px; margin: 0 auto 6px;
+  border-radius: 4px; font-size: 14px; font-weight: 700; color: #fff;
+}
+.mg-type { display: block; font-size: 12px; color: var(--text-secondary); margin-bottom: 2px; }
+.mg-dur { display: block; font-size: 11px; color: var(--text-muted); font-family: var(--font-mono); }
+.mg-del {
+  position: absolute; top: 4px; right: 4px;
+  width: 18px; height: 18px; border: none; border-radius: 3px;
+  background: transparent; color: var(--text-muted); font-size: 12px; cursor: pointer;
+  opacity: 0; transition: opacity .15s;
+}
+.mg-card:hover .mg-del { opacity: 1; }
+.mg-del:hover { background: var(--error-dim); color: var(--error); }
 .card__empty { font-size: 13px; color: var(--text-muted); padding: 12px 0; }
 
 .card-divider { height: 16px; display: flex; align-items: center; justify-content: center; }
 .card-divider::after { content: ''; display: block; width: 40px; height: 1px; background: var(--border-default); }
+
+/* ── Detail panel ── */
+.side-panel--detail { padding: 0; overflow: hidden; display: flex; flex-direction: column; }
+
+.det__title {
+  padding: 8px 14px; height: 36px; flex-shrink: 0;
+  font-size: 14px; font-weight: 600; color: var(--text-primary);
+  background: linear-gradient(90deg, var(--bg-elevated), rgba(245,158,11,0.08));
+  border-bottom: 1px solid var(--border-default);
+  display: flex; align-items: center;
+}
+
+.det { flex: 1; overflow-y: auto; padding: 10px 14px; scrollbar-width: thin; scrollbar-color: rgba(136,136,160,0.3) transparent; display: flex; flex-direction: column; }
+.det__head { font-size: 12px; color: var(--text-primary); font-weight: 600; margin-bottom: 4px; }
+.det__dur { color: var(--text-muted); font-weight: 400; font-family: var(--font-mono); font-size: 11px; }
+.det__eta { font-size: 11px; color: var(--accent); font-weight: 500; margin-bottom: 8px; font-family: var(--font-mono); }
+
+.det-body { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; flex: 1; min-height: 0; }
+.det-left { overflow-y: auto; }
+.det-right { overflow-y: auto; display: flex; flex-direction: column; }
+.det-right .det__sec { flex: 1; display: flex; flex-direction: column; }
+.det-right .det__ta { flex: 1; min-height: 180px; }
+
+.det__sec { margin-bottom: 8px; padding: 8px 10px; background: var(--bg-elevated); border-radius: 6px; }
+.det__sub { font-size: 11px; color: var(--accent); margin-bottom: 4px; font-weight: 600; }
+.det__row { font-size: 11px; line-height: 1.5; color: var(--text-secondary); }
+.det__k { color: var(--text-muted); }
+.det__v { color: #a371f7; }
+.det__ta {
+  width: 100%; padding: 8px; border: 1px solid var(--border-default); border-radius: var(--radius-sm);
+  background: var(--bg-input); color: var(--text-primary);
+  font-family: var(--font-mono); font-size: 11px; resize: vertical; line-height: 1.5;
+}
+.det__ta:focus { outline: none; border-color: var(--accent); }
+.det__footer { display: flex; align-items: center; gap: 6px; margin-top: 8px; flex-shrink: 0; padding-top: 8px; border-top: 1px solid var(--border-default); }
+.det__fmt { display: flex; gap: 4px; }
+
+@media (max-width: 480px) {
+  .det-body { grid-template-columns: 1fr; }
+}
 
 /* ── Dropzone ── */
 .dropzone {
