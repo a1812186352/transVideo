@@ -30,32 +30,7 @@
           <div class="preview__spinner" />
           <span class="preview__step">{{ currentStep }}</span>
         </div>
-        <!-- Analyze button (shown after upload, before/during/after analysis) -->
-        <div v-if="showAnalyzeBtn" class="preview__actions">
-          <button
-            class="preview__analyze-btn"
-            :class="{
-              'preview__analyze-btn--processing': store.analysisStatus === 'processing',
-              'preview__analyze-btn--done': store.analysisStatus === 'completed',
-              'preview__analyze-btn--fail': store.analysisStatus === 'failed',
-            }"
-            :disabled="store.analysisStatus === 'processing'"
-            @click.stop="ws.handleAnalyze()"
-          >
-            <template v-if="store.analysisStatus === 'idle'">▶ 开始分析</template>
-            <template v-else-if="store.analysisStatus === 'processing'">
-              <span class="preview__spinner-sm" /> 分析中…
-            </template>
-            <template v-else-if="store.analysisStatus === 'completed'">✓ 分析完成</template>
-            <template v-else-if="store.analysisStatus === 'failed'">↻ 重试分析</template>
-          </button>
-          <div v-if="store.analysisStatus === 'completed'" class="preview__eta">
-            实际耗时: {{ ws.analysisActualTime || '—' }}
-          </div>
-          <div v-else-if="store.analysisStatus === 'idle' && totalDuration > 0" class="preview__eta">
-            预计分析: {{ ws.fmtEta(totalDuration) }}
-          </div>
-        </div>
+
       </div>
     </div>
 
@@ -98,16 +73,13 @@ const videoId = computed(() => store.videoId);
 const videoSrc = computed(() => {
   if (!store.videoId) return '';
   const base = store.apiBaseUrl.replace(/\/+$/, '');
-  return `${base}/video/${store.videoId}/stream`;
+  return `${base}/upload/video/${store.videoId}`;
 });
 const analyzing = computed(() => store.analysisStatus === 'processing');
 const currentStep = computed(() => {
   // Show latest monitor log message as step indicator
   return '正在分析…';
 });
-const showAnalyzeBtn = computed(() =>
-  store.videoId && (store.analysisStatus === 'idle' || store.analysisStatus === 'processing' || store.analysisStatus === 'completed' || store.analysisStatus === 'failed')
-);
 const totalDuration = computed(() => store.script.metadata.total_duration || 0);
 
 // ── Thumbnails (generated from video metadata) ──
@@ -119,16 +91,20 @@ watch(videoId, (id) => {
   generateThumbnails(id);
 });
 
-function generateThumbnails(id: string) {
+async function generateThumbnails(id: string) {
   const dur = store.script.metadata.total_duration || 60;
   const count = Math.min(20, Math.floor(dur / 2));
+  const interval = Math.max(0.5, dur / count);
   const base = store.apiBaseUrl.replace(/\/+$/, '');
-  const thumbs: Thumb[] = [];
-  for (let i = 0; i < count; i++) {
-    const t = (dur / count) * i;
-    thumbs.push({ time: t, src: `${base}/video/${id}/thumbnail?time=${t.toFixed(1)}` });
+  try {
+    const res = await fetch(`${base}/upload/video/${id}/thumbnails?interval=${interval}`);
+    if (!res.ok) throw new Error(`HTTP ${res.status}`);
+    const data: { timestamp: number; data_uri: string }[] = await res.json();
+    thumbnails.value = data.map(t => ({ time: t.timestamp, src: t.data_uri }));
+  } catch (e) {
+    console.warn('Failed to load thumbnails:', e);
+    thumbnails.value = [];
   }
-  thumbnails.value = thumbs;
 }
 
 // ── Video controls ──
@@ -262,9 +238,13 @@ function onDrop(e: DragEvent) {
 
 /* ── Thumbnail strip ── */
 .preview__strip {
-  width: 100%; max-width: 720px; margin: 10px auto 0;
+  width: 100%; max-width: 720px; margin: 0 auto;
   display: flex; gap: 4px; overflow-x: auto; padding: 6px 0;
+  scrollbar-width: thin;
+  scrollbar-color: var(--border) transparent;
 }
+.preview__strip::-webkit-scrollbar { height: 6px; }
+.preview__strip::-webkit-scrollbar-thumb { background: var(--text-muted); border-radius: 3px; }
 .preview__strip-inner {
   display: flex;
   gap: 4px;
@@ -288,64 +268,5 @@ function onDrop(e: DragEvent) {
   display: block;
 }
 
-/* ── Analyze action bar ── */
-.preview__actions {
-  position: absolute;
-  bottom: 0;
-  left: 0;
-  right: 0;
-  display: flex;
-  align-items: center;
-  gap: 10px;
-  padding: 10px 14px;
-  background: linear-gradient(transparent, rgba(0,0,0,0.7));
-  z-index: 5;
-}
-.preview__analyze-btn {
-  padding: 7px 18px;
-  border: none;
-  border-radius: var(--radius-sm);
-  background: var(--accent);
-  color: #fff;
-  font-size: 12px;
-  font-weight: 600;
-  cursor: pointer;
-  transition: all var(--transition);
-  white-space: nowrap;
-}
-.preview__analyze-btn:hover:not(:disabled) {
-  background: var(--accent-hover);
-}
-.preview__analyze-btn:disabled {
-  opacity: 0.6;
-  cursor: not-allowed;
-}
-.preview__analyze-btn--processing {
-  background: var(--bg-surface);
-  color: var(--text-primary);
-  border: 1px solid var(--border);
-}
-.preview__analyze-btn--done {
-  background: #1a7f37;
-}
-.preview__analyze-btn--fail {
-  background: #da3633;
-}
-.preview__spinner-sm {
-  display: inline-block;
-  width: 12px;
-  height: 12px;
-  border: 2px solid rgba(255,255,255,0.2);
-  border-top-color: #fff;
-  border-radius: 50%;
-  animation: spin 0.7s linear infinite;
-  vertical-align: middle;
-  margin-right: 4px;
-}
-.preview__eta {
-  font-size: 10px;
-  color: rgba(255,255,255,0.7);
-  font-family: var(--font-mono);
-  white-space: nowrap;
-}
+
 </style>

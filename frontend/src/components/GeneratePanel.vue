@@ -83,6 +83,21 @@
         </div>
         <div v-else class="gen__history-empty">暂无生成记录</div>
       </div>
+
+      <div class="gen__divider" />
+
+      <!-- ═══ Monitor log ═══ -->
+      <div class="gen-monitor">
+        <div class="gen-monitor__title">分析日志</div>
+        <div class="gen-monitor__body" ref="monitorBody" @scroll="ws.onMonitorScroll($event.target as HTMLElement)">
+          <div v-for="(log, i) in ws.monitorLogs" :key="i" class="gen-monitor__line">
+            <span class="gen-monitor__ts">{{ log.ts }}</span>
+            <span class="gen-monitor__tag" v-if="log.tag">[{{ log.tag }}]</span>
+            <span class="gen-monitor__msg" v-html="log.msg"></span>
+          </div>
+          <div v-if="ws.monitorLogs.length === 0" class="gen-monitor__empty">等待任务</div>
+        </div>
+      </div>
     </div>
   </div>
 </template>
@@ -94,6 +109,8 @@ import { useWorkbenchStore } from '../stores/workbench';
 
 const store = useProjectStore();
 const ws = useWorkbenchStore();
+
+const monitorBody = ref<HTMLDivElement | null>(null);
 
 // ── Export state (from workbench store) ──
 const exportDownloadUrl = computed(() => ws.exportDownloadUrl);
@@ -365,5 +382,56 @@ function deleteItem(item: HistoryItem) {
   font-size: 11px;
   color: var(--text-muted);
   padding: 6px 0;
+}
+
+/* ── Monitor log ── */
+.gen-monitor {
+  margin-top: 4px;
+}
+.gen-monitor__title {
+  font-size: 10px; color: var(--text-muted);
+  text-transform: uppercase; letter-spacing: 0.3px;
+  margin-bottom: 4px;
+}
+.gen-monitor__body {
+  max-height: 100px;
+  overflow-y: auto;
+  background: #0d1117;
+  border: 1px solid #21262d;
+  border-radius: var(--radius-sm);
+  padding: 4px 6px;
+  font-family: var(--font-mono);
+  font-size: 10px;
+  line-height: 1.5;
+  scrollbar-width: thin;
+  scrollbar-color: #21262d transparent;
+}
+.gen-monitor__line {
+  display: flex;
+  gap: 4px;
+  white-space: nowrap;
+}
+.gen-monitor__ts {
+  color: #7ee787;
+  flex-shrink: 0;
+}
+.gen-monitor__tag {
+  color: #8b949e;
+  flex-shrink: 0;
+}
+.gen-monitor__msg {
+  color: #c9d1d9;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.gen-monitor__msg b {
+  color: #a371f7;
+  font-weight: 600;
+}
+.gen-monitor__empty {
+  color: #484f58;
+  padding: 8px;
+  text-align: center;
+  font-size: 10px;
 }
 </style>

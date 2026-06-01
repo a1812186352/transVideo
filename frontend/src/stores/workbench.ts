@@ -99,7 +99,7 @@ export const useWorkbenchStore = defineStore('workbench', () => {
   const videoSrc = computed(() => {
     if (!project.videoId) return '';
     const base = project.apiBaseUrl.replace(/\/+$/, '');
-    return `${base}/video/${project.videoId}/stream`;
+    return `${base}/upload/video/${project.videoId}`;
   });
 
   function seekVideo(time: number) {
@@ -270,7 +270,7 @@ export const useWorkbenchStore = defineStore('workbench', () => {
     try {
       const base = project.apiBaseUrl.replace(/\/+$/, '');
       const fd = new FormData();
-      fd.append('video_file', file);
+      fd.append('file', file);
       fd.append('title', file.name.replace(/\.[^.]+$/, ''));
       const res = await fetch(`${base}/upload`, { method: 'POST', body: fd });
       if (!res.ok) throw new Error(`Upload failed: HTTP ${res.status}`);

@@ -47,6 +47,7 @@
             </svg>
           </div>
           <div class="mat-card__name">{{ mat.filename }}</div>
+          <button class="mat-card__delete" @click.stop="deleteMaterial(mat.material_id)" title="删除">×</button>
         </div>
       </div>
       <div v-else class="mat-empty">
@@ -173,6 +174,14 @@ async function uploadFiles(files: File[]) {
   uploading.value = false;
 }
 
+async function deleteMaterial(mid: string) {
+  try {
+    const base = (props.apiBaseUrl || '').replace(/\/+$/, '');
+    await fetch(`${base}/materials/${mid}`, { method: 'DELETE' });
+    materials.value = materials.value.filter(m => m.material_id !== mid);
+  } catch { /* ignore */ }
+}
+
 function onDragStart(id: string, e: DragEvent) {
   e.dataTransfer?.setData('application/x-material-id', id);
   e.dataTransfer!.effectAllowed = 'copy';
@@ -252,6 +261,7 @@ function onDragStart(id: string, e: DragEvent) {
 
 /* ── Card ── */
 .mat-card {
+  position: relative;
   border: 1px solid var(--border);
   border-radius: var(--radius-sm);
   overflow: hidden;
@@ -290,6 +300,30 @@ function onDragStart(id: string, e: DragEvent) {
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
+}
+.mat-card__delete {
+  position: absolute;
+  top: 3px;
+  right: 3px;
+  width: 18px;
+  height: 18px;
+  border: none;
+  border-radius: 50%;
+  background: rgba(0,0,0,0.55);
+  color: #fff;
+  font-size: 11px;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  opacity: 0;
+  transition: opacity var(--transition);
+}
+.mat-card:hover .mat-card__delete {
+  opacity: 1;
+}
+.mat-card__delete:hover {
+  background: #da3633;
 }
 
 /* ── Empty state ── */

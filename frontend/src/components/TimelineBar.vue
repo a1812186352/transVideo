@@ -101,6 +101,8 @@ const progressPct = computed(() => {
 .timeline__modules {
   flex: 1; display: flex; align-items: center;
   padding: 0 12px; gap: 6px; overflow-x: auto;
+  scrollbar-width: thin;
+  scrollbar-color: var(--border) transparent;
 }
 
 /* ── Module card ── */
