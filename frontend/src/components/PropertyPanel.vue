@@ -2,33 +2,7 @@
   <div class="prop">
     <div class="prop__title">模块解析</div>
 
-    <!-- ═══ Video Metadata ═══ -->
-    <div class="prop-metadata" v-if="store.videoId">
-      <div class="prop-meta-row">
-        <span class="prop-meta-label">分辨率</span>
-        <span class="prop-meta-value">{{ store.script.metadata.resolution.width }}×{{ store.script.metadata.resolution.height }}</span>
-      </div>
-      <div class="prop-meta-row">
-        <span class="prop-meta-label">时长</span>
-        <span class="prop-meta-value">{{ fmtDuration(store.script.metadata.total_duration) }}</span>
-      </div>
-      <div class="prop-meta-row">
-        <span class="prop-meta-label">帧率</span>
-        <span class="prop-meta-value">{{ store.script.metadata.fps }}fps</span>
-      </div>
-      <div class="prop-meta-row" v-if="store.analysisStatus === 'idle' && store.script.metadata.total_duration > 0">
-        <span class="prop-meta-label">预计分析</span>
-        <span class="prop-meta-value">{{ ws.fmtEta(store.script.metadata.total_duration) }}</span>
-      </div>
-      <div class="prop-meta-row" v-if="store.analysisStatus === 'completed'">
-        <span class="prop-meta-label">实际耗时</span>
-        <span class="prop-meta-value">{{ ws.analysisActualTime || '—' }}</span>
-      </div>
-      <div class="prop-meta-row" v-if="store.analysisStatus === 'processing'">
-        <span class="prop-meta-label">分析进度</span>
-        <span class="prop-meta-value prop-meta-value--processing">分析中…</span>
-      </div>
-    </div>
+
 
     <!-- ═══ Analyze button ═══ -->
     <div class="prop-analyze" v-if="store.videoId">
@@ -118,14 +92,6 @@ import { useWorkbenchStore } from '../stores/workbench';
 
 const store = useProjectStore();
 const ws = useWorkbenchStore();
-
-const fmtDuration = (s: number): string => {
-  if (!s || s <= 0) return '—';
-  const min = Math.floor(s / 60);
-  const sec = Math.floor(s % 60);
-  const pad = (n: number) => String(n).padStart(2, '0');
-  return min > 0 ? `${min}:${pad(sec)}` : `0:${pad(sec)}`;
-};
 
 const groups = reactive({
   scene: true, visual: true, color: true, audio: true, text: true,
@@ -298,33 +264,6 @@ const energyBars = computed(() => {
   font-size: 11px;
   color: var(--text-muted);
 }
-
-/* ── Metadata ── */
-.prop-metadata {
-  padding: 6px 12px;
-  border-bottom: 1px solid var(--border);
-  flex-shrink: 0;
-}
-.prop-meta-row {
-  display: flex;
-  justify-content: space-between;
-  align-items: center;
-  padding: 2px 0;
-  font-size: 11px;
-}
-.prop-meta-label {
-  color: var(--text-muted);
-}
-.prop-meta-value {
-  color: var(--text-secondary);
-  font-family: var(--font-mono);
-  font-size: 10px;
-}
-.prop-meta-value--processing {
-  color: #f0b429;
-  animation: pulse 1.2s ease-in-out infinite;
-}
-@keyframes pulse { 0%,100%{opacity:1} 50%{opacity:.3} }
 
 /* ── Analyze button ── */
 .prop-analyze {

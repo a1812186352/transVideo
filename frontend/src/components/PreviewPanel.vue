@@ -15,6 +15,16 @@
         <span>拖入视频开始分析</span>
       </div>
 
+      <!-- Video info bar -->
+      <div v-if="videoId" class="preview__info">
+        <span class="preview__info-title">{{ uploadFileName || store.script.metadata.title || '—' }}</span>
+        <span class="preview__info-meta">
+          {{ store.script.metadata.resolution.width }}×{{ store.script.metadata.resolution.height }}
+          · {{ fmtDuration(store.script.metadata.total_duration) }}
+          · {{ store.script.metadata.fps }}fps
+        </span>
+      </div>
+
       <!-- Video player -->
       <div v-else class="preview__player">
         <video
@@ -80,7 +90,16 @@ const currentStep = computed(() => {
   // Show latest monitor log message as step indicator
   return '正在分析…';
 });
+const uploadFileName = computed(() => ws.uploadFileName);
 const totalDuration = computed(() => store.script.metadata.total_duration || 0);
+
+const fmtDuration = (s: number): string => {
+  if (!s || s <= 0) return '—';
+  const min = Math.floor(s / 60);
+  const sec = Math.floor(s % 60);
+  const pad = (n: number) => String(n).padStart(2, '0');
+  return min > 0 ? `${min}:${pad(sec)}` : `0:${pad(sec)}`;
+};
 
 // ── Thumbnails (generated from video metadata) ──
 interface Thumb { time: number; src: string; }
@@ -175,6 +194,32 @@ function onDrop(e: DragEvent) {
 .preview__dropzone:hover .preview__play-icon {
   border-color: var(--accent);
 }
+/* ── Info bar (above player) ── */
+.preview__info {
+  width: 100%;
+  max-width: 720px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 6px 0 4px;
+  flex-shrink: 0;
+}
+.preview__info-title {
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--text-primary);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.preview__info-meta {
+  font-size: 10px;
+  color: var(--text-muted);
+  font-family: var(--font-mono);
+  flex-shrink: 0;
+  margin-left: 12px;
+}
+
 .preview__play-icon {
   width: 40px; height: 40px; border-radius: 50%;
   border: 2px solid var(--border);
