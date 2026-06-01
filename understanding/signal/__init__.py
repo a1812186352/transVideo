@@ -9,4 +9,7 @@ def __getattr__(name):
     if name == "OCRExtractor":
         from understanding.signal.ocr_extract import OCRExtractor as _cls
         return _cls
+    if name == "VisualFeatureExtractor":
+        from understanding.signal.visual_features import VisualFeatureExtractor as _cls
+        return _cls
     raise AttributeError(f"module {__name__!r} has no attribute {name!r}")

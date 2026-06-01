@@ -1,1 +1,1 @@
-"""Understand layer: cloud LLM semantic analysis."""
+"""Understand layer: rule-engine narrative structure inference + visual features."""

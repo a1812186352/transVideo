@@ -31,7 +31,7 @@ transVideo 是一个**视频结构理解 → 可迁移脚本 → 个性化视频
 |------|--------|------|
 | `understanding/signal/` | **95%** ✅ | 六大通道全部实现：帧差 / 场景检测 / 语音转录 / 音频分析 / Tesseract OCR / 帧提取；含时间戳、懒加载、错误降级 |
 | `understanding/filter/` | **90%** ✅ | 自适应采样含百分位阈值、区域密度、边界强制捕获；新增 `sample_by_count()` 和 `sample_with_context()` |
-| `understanding/understand/` | **80%** ✅ | `vision.py` 支持可配置 LLM API，未配置时降级；`structure.py` 的 `infer()` 已实现规则引擎 + 位置/活动 fallback，零 API 可运行 |
+| `understanding/understand/` | **85%** ✅ | `structure.py` 的 `infer()` 已实现规则引擎 + 位置/活动 fallback + 视觉特征融合，零 API 可运行 |
 | `script/` | **92%** ✅ | Schema + Builder + Manipulator + Validator；新增 `create_empty_script()` / `duplicate_module()` / `shift_all_modules()` / `compact_timeline()`；5 项完整性检查 |
 | `backend/` | **80%** ✅ | 路由框架完整（upload/analysis/export）；`_build_module_tree()` 已实现 6 种 segment→Module 映射；OCR 集成；全组件懒加载 + 降级保护 |
 | `frontend/` | **80%** ✅ | Vue 3 + Pinia + TypeScript；双通道工作台布局（分析管线 / 生成管线）；中文化 UI；API 设置面板含 Test Connection；InspectorPanel 参数编辑 |
@@ -53,7 +53,7 @@ transVideo 是一个**视频结构理解 → 可迁移脚本 → 个性化视频
 - [x] 音频分析自动提取视频音轨（ffmpeg → wav → librosa）
 - [x] API 设置面板（前端可配置后端地址 + LLM API Key）
 
-- [ ] **【可选】视觉 LLM**：`vision.py` — 需用户配置 Qwen-VL / GPT-4V API Key
+- [x] ~~【可选】视觉 LLM：`vision.py`~~ — 已移除，结构推理纯本地规则引擎
 - [ ] **【可选】Whisper 模型下载**：首次运行自动下载 small 模型（~1GB）
 - [ ] **【缺】端到端冒烟测试**：instances/ 下 3 个 .mov 的完整跑通验证
 - [ ] **【缺】任务持久化**：`_jobs` dict 替换为 SQLite
@@ -75,7 +75,7 @@ transVideo 是一个**视频结构理解 → 可迁移脚本 → 个性化视频
 
 | 任务 | 文件 | 状态 |
 |------|------|------|
-| 实现 `vision.py` API 调用 | `understanding/understand/vision.py` | ✅ 可配置，未配置时降级 |
+| ~~实现 `vision.py` API 调用~~ | ~~`understanding/understand/vision.py`~~ | ❌ 已移除 — 结构推理全本地化 |
 | 实现 `structure.py` 的 `infer()` | `understanding/understand/structure.py` | ✅ 规则引擎 + 位置/活动 fallback |
 | 帧提取工具 | `understanding/signal/frame_extractor.py` | ✅ OpenCV 按索引抽帧 PNG |
 

@@ -46,13 +46,13 @@ class Composer:
         # Fill template
         html = Template(template).safe_substitute(
             title=metadata.get("title", "Untitled"),
-            width=metadata.get("resolution", {}).get("width", 1920),
-            height=metadata.get("resolution", {}).get("height", 1080),
+            width=(metadata.get("resolution") or {}).get("width", 1920),
+            height=(metadata.get("resolution") or {}).get("height", 1080),
             fps=metadata.get("fps", 30),
             total_duration=metadata.get("total_duration", 0.0),
             tracks=track_html,
             modules=module_elements,
-            script_json=json.dumps(script, indent=2, ensure_ascii=False),
+            script_json=json.dumps(script, indent=2, ensure_ascii=False, default=str),
         )
 
         return html
@@ -95,8 +95,8 @@ class Composer:
         """Build HTML fragment for each module."""
         lines: List[str] = []
         for mod in modules:
-            params = mod.get("params", {})
-            source = mod.get("source", {})
+            params = mod.get("params") or {}
+            source = mod.get("source") or {}
 
             attrs = {
                 "data-module-id": mod["id"],

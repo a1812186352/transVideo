@@ -13,10 +13,15 @@ class FrameDiffAnalyzer:
 
     Attributes:
         bins: Number of histogram bins per channel (default 32 for H, 32 for S).
+        frame_skip: Sample every Nth frame (default 5 — 60fps → 12fps effective).
     """
 
-    def __init__(self, bins: int = 32) -> None:
+    def __init__(self, bins: int = 32, frame_skip: int = 5) -> None:
         self.bins = bins
+        self.frame_skip = frame_skip
+        # Enable OpenCL acceleration if available
+        if cv2.ocl.haveOpenCL():
+            cv2.ocl.setUseOpenCL(True)
 
     def calc_diff_curve(self, video_path: str) -> List[float]:
         """Compute frame-difference values for the entire video.
@@ -43,10 +48,15 @@ class FrameDiffAnalyzer:
 
         prev_hist = self._compute_hsv_histogram(prev_frame)
 
+        skipped = 0
         while True:
             ret, frame = cap.read()
             if not ret:
                 break
+            skipped += 1
+            if skipped < self.frame_skip:
+                continue
+            skipped = 0
             curr_hist = self._compute_hsv_histogram(frame)
             diff = cv2.compareHist(prev_hist, curr_hist, cv2.HISTCMP_CHISQR)
             diff_curve.append(float(diff))
@@ -84,18 +94,20 @@ class FrameDiffAnalyzer:
             return diff_curve, timestamps
 
         prev_hist = self._compute_hsv_histogram(prev_frame)
-        frame_idx = 1
+        frame_idx = 0
 
         while True:
             ret, frame = cap.read()
             if not ret:
                 break
+            frame_idx += 1
+            if frame_idx % self.frame_skip != 0:
+                continue
             curr_hist = self._compute_hsv_histogram(frame)
             diff = cv2.compareHist(prev_hist, curr_hist, cv2.HISTCMP_CHISQR)
             diff_curve.append(float(diff))
             timestamps.append(frame_idx / fps)
             prev_hist = curr_hist
-            frame_idx += 1
 
         cap.release()
         return diff_curve, timestamps

@@ -2,6 +2,7 @@
 
 import os
 from fastapi import APIRouter, HTTPException, BackgroundTasks
+from fastapi.responses import FileResponse
 
 from backend.models.script import ExportResponse, MigratableScript
 from backend.store import JobStore
@@ -31,9 +32,10 @@ async def _run_export(video_id: str, script: MigratableScript) -> None:
             output_path=output_path,
         )
 
+        filename = os.path.basename(result_path)
         _export_jobs[video_id] = {
             "status": "completed",
-            "output_path": result_path,
+            "output_path": f"export/output/{filename}",
         }
     except Exception as e:
         _export_jobs[video_id] = {
@@ -93,3 +95,23 @@ async def get_export_status(video_id: str) -> ExportResponse:
         output_path=job.get("output_path"),
         error=job.get("error"),
     )
+
+
+@router.get("/output/{filename}")
+async def get_output_file(filename: str):
+    """Serve a rendered output video file.
+
+    Resolves the filename against OUTPUT_DIR with a path-traversal
+    safety check.
+    """
+    resolved = os.path.normpath(os.path.join(OUTPUT_DIR, filename))
+    output_dir_norm = os.path.normpath(OUTPUT_DIR)
+
+    # Prevent path-traversal escape
+    if not str(resolved).startswith(output_dir_norm):
+        raise HTTPException(status_code=403, detail="Access denied")
+
+    if not os.path.isfile(resolved):
+        raise HTTPException(status_code=404, detail="File not found")
+
+    return FileResponse(resolved, media_type="video/mp4")

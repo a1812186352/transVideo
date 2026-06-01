@@ -69,7 +69,7 @@ class HyperFramesRenderer:
         html_content = composer.script_to_html(script_json)
 
         # Write HTML to temp file
-        title = script_json.get("metadata", {}).get("title", "output")
+        title = (script_json.get("metadata") or {}).get("title", "output")
         html_path = os.path.join(
             self.work_dir, f"_render_{title}.html"
         )
@@ -94,9 +94,10 @@ class HyperFramesRenderer:
                 success = True
                 return output_path
 
-            raise RuntimeError(
-                "Both HyperFrames CLI and FFmpeg fallback failed to render"
-            )
+            err_msg = "Both HyperFrames CLI and FFmpeg fallback failed to render"
+            if hasattr(self, '_last_ffmpeg_error'):
+                err_msg += f" (FFmpeg: {self._last_ffmpeg_error})"
+            raise RuntimeError(err_msg)
         finally:
             if cleanup_html and success:
                 try:
@@ -161,32 +162,24 @@ class HyperFramesRenderer:
         Returns:
             True if the fallback render succeeded, False otherwise.
         """
-        metadata = script_json.get("metadata", {})
+        metadata = script_json.get("metadata") or {}
         title = metadata.get("title", "Untitled")
         duration = metadata.get("total_duration", 5.0)
-        width = metadata.get("resolution", {}).get("width", 1920)
-        height = metadata.get("resolution", {}).get("height", 1080)
+        width = (metadata.get("resolution") or {}).get("width", 1920)
+        height = (metadata.get("resolution") or {}).get("height", 1080)
 
         # Escape special characters in the title for FFmpeg drawtext.
         # Colons are argument separators; single quotes delimit the text
         # argument; backslashes are escape characters.
-        safe_title = (
-            title.replace("\\", "\\\\")
-            .replace(":", "\\:")
-            .replace("'", "\\'")
-        )
+        safe_title = title or "Untitled"
+        safe_title = safe_title.replace("\\", "\\\\").replace(":", "\\:").replace("'", "\\'")
 
+        import shutil
+        ffmpeg = shutil.which("ffmpeg") or "ffmpeg"
         cmd = [
-            "ffmpeg", "-y",
+            ffmpeg, "-y",
             "-f", "lavfi",
             "-i", f"color=c=0x1a1a2e:s={width}x{height}:d={duration}:r={fps}",
-            "-vf",
-            (
-                f"drawtext=text='{safe_title}':"
-                f"fontcolor=white:fontsize=48:"
-                f"x=(w-text_w)/2:y=(h-text_h)/2:"
-                f"box=1:boxcolor=black@0.4:boxborderw=16"
-            ),
             "-c:v", "libx264",
             "-crf", str(crf),
             "-preset", "fast",
@@ -197,12 +190,12 @@ class HyperFramesRenderer:
         try:
             result = subprocess.run(cmd, capture_output=True, text=True, timeout=300)
             if result.returncode != 0:
-                logger.error(f"FFmpeg fallback render failed: {result.stderr}")
+                self._last_ffmpeg_error = result.stderr.strip()[-120:]
                 return False
             return True
         except FileNotFoundError:
-            logger.error("FFmpeg not found. Cannot render video.")
+            self._last_ffmpeg_error = "FFmpeg not found"
             return False
         except subprocess.TimeoutExpired:
-            logger.error("FFmpeg fallback render timed out")
+            self._last_ffmpeg_error = "timed out"
             return False

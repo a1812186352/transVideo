@@ -44,6 +44,56 @@
       />
     </div>
 
+    <div class="ass-divider" />
+
+    <div class="ass-section-label">视觉模型</div>
+
+    <div class="ass-field">
+      <label for="ass-vision-provider">分析方式</label>
+      <select
+        id="ass-vision-provider"
+        class="ass-select"
+        :value="store.visionProvider"
+        @change="store.setVisionProvider(($event.target as HTMLSelectElement).value)"
+      >
+        <option value="local">本地 YOLOv8 + OpenCV</option>
+        <option value="api">外部 API（多模态 LLM）</option>
+      </select>
+    </div>
+
+    <template v-if="store.visionProvider === 'api'">
+      <div class="ass-field">
+        <label for="ass-vision-url">API 地址</label>
+        <input
+          id="ass-vision-url"
+          type="text"
+          :value="store.visionApiUrl"
+          @input="store.setVisionApiUrl(($event.target as HTMLInputElement).value)"
+          placeholder="https://dashscope.aliyuncs.com/api/v1/services/aigc/multimodal-generation/generation"
+        />
+      </div>
+      <div class="ass-field">
+        <label for="ass-vision-key">API 密钥</label>
+        <input
+          id="ass-vision-key"
+          type="password"
+          :value="store.visionApiKey"
+          @input="store.setVisionApiKey(($event.target as HTMLInputElement).value)"
+          placeholder="sk-..."
+        />
+      </div>
+      <div class="ass-field">
+        <label for="ass-vision-model">模型名称</label>
+        <input
+          id="ass-vision-model"
+          type="text"
+          :value="store.visionModel"
+          @input="store.setVisionModel(($event.target as HTMLInputElement).value)"
+          placeholder="qwen-vl-max"
+        />
+      </div>
+    </template>
+
     <div class="ass-actions">
       <button
         class="ass-test-btn"
@@ -166,5 +216,36 @@ async function testConnection() {
 
 .ass-result--ok {
   color: var(--success);
+}
+
+.ass-divider {
+  height: 1px;
+  background: var(--border-default);
+  margin: 8px 0;
+}
+
+.ass-section-label {
+  font-size: 11px;
+  color: var(--accent-amber);
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+  font-weight: 600;
+  margin-bottom: 4px;
+}
+
+.ass-select {
+  padding: 8px 10px;
+  border: 1px solid var(--border-default);
+  border-radius: var(--radius-sm);
+  background: var(--bg-input);
+  color: var(--text-primary);
+  font-size: 13px;
+  font-family: var(--font-mono);
+  cursor: pointer;
+}
+
+.ass-select:focus {
+  outline: none;
+  border-color: var(--accent-amber);
 }
 </style>

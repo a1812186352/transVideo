@@ -18,13 +18,13 @@ export type ModuleType =
 /** Track type enumeration */
 export type TrackType = 'video' | 'audio' | 'text' | 'effect';
 
-/** Structure type from narrative inference */
+/** Structure type from narrative inference (matches understand/structure.py) */
 export type StructureType =
-  | 'hook'
-  | 'talking_head'
-  | 'montage'
-  | 'conversion'
-  | 'outro'
+  | 'opening'
+  | 'highlight'
+  | 'transition'
+  | 'effect'
+  | 'closing'
   | 'unclassified';
 
 /** Reference to a source asset file */

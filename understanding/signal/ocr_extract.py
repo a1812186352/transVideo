@@ -49,15 +49,25 @@ class OCRExtractor:
         """
         _ensure_deps()
         results: List[dict] = []
+        frames_with_text = 0
+        total_regions = 0
 
         for frame_path in frame_paths:
             regions = self._ocr_frame(frame_path)
+            if regions:
+                frames_with_text += 1
+                total_regions += len(regions)
             results.append({
                 "frame_path": frame_path,
                 "text_regions": regions,
                 "timestamp": 0.0,  # filled by caller if needed
             })
 
+        import logging
+        _log = logging.getLogger(__name__)
+        if frames_with_text == 0 and frame_paths:
+            _log.warning("OCR: 0/%d frames have text — may indicate OCR engine issue or text-free frames",
+                         len(frame_paths))
         return results
 
     def extract_single(self, frame_path: str) -> List[dict]:

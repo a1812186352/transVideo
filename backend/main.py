@@ -15,7 +15,7 @@ if str(_project_root) not in sys.path:
 
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
-from backend.routers import upload, analysis, export
+from backend.routers import upload, analysis, export, config, materials
 
 app = FastAPI(
     title="transVideo API",
@@ -41,6 +41,8 @@ app.add_middleware(
 app.include_router(upload.router)
 app.include_router(analysis.router)
 app.include_router(export.router)
+app.include_router(config.router)
+app.include_router(materials.router)
 
 
 @app.get("/")

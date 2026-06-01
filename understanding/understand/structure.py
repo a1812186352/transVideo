@@ -1,444 +1,568 @@
-"""Narrative structure inference from multi-modal signal data.
+"""Narrative structure inference — 5-type sliding-window classifier.
 
-Combines visual descriptions, audio transcripts, beat density, silence
-boundaries, and OCR results to infer narrative segment types:
-Hook / Talking Head / Montage / Conversion / Outro.
+Classifies video timeline into: opening / highlight / transition / effect / closing.
+Uses position heuristics, scene boundaries, energy curve, speech, and OCR signals.
 """
 
-from typing import List, Optional
+from typing import List, Dict, Any, Tuple, Optional
+
+
+# ── 5-type system ──
+TYPE_OPENING = "opening"
+TYPE_HIGHLIGHT = "highlight"
+TYPE_TRANSITION = "transition"
+TYPE_EFFECT = "effect"
+TYPE_CLOSING = "closing"
+TYPE_UNCLASSIFIED = "unclassified"
+
+# ── OCR keyword sets ──
+_OPENING_KW = ["start", "opening", "intro", "begin", "title", "logo",
+               "episode", "vol", "chapter", "第", "集", "片头", "开幕",
+               "开始", "前方", "前排", "第一", "预告", "开篇", "序章",
+               "登场", "出场", "序幕", "背景介绍", "前情提要", "播出"]
+_HIGHLIGHT_KW = ["battle", "fight", "explosion", "climax", "燃", "爆",
+                 "绝了", "高能", "神", "帅", "厉害", "卧槽", "牛", "炸",
+                 "精彩", "超燃", "名场面", "高光", "对决", "激战", "反转",
+                 "真相", "高峰", "飙升", "全场最佳", "高潮"]
+_CLOSING_KW = ["end", "closing", "outro", "credits", "goodbye", "完结",
+               "撒花", "再见", "结束", "辛苦", "下期", "期待", "谢幕",
+               "片尾", "彩蛋", "to be continued", "see you", "告别",
+               "落幕", "尾声", "终章", "感谢观看", "谢谢", "敬请期待",
+               "下集"]
+
+# Transition indicators (OCR text suggesting scene change)
+_TRANSITION_KW = ["later", "meanwhile", "elsewhere", "之后", "同时",
+                  "另一边", "时间跳转", "回想", "回忆", "切换", "转场",
+                  "闪回", "倒叙", "插叙", "画面一转", "镜头切换"]
 
 
 class StructureInferrer:
-    """Infers narrative structure by combining all signal + understanding data.
+    """5-type sliding-window narrative classifier.
 
-    Classification rules:
+    Types: opening / highlight / transition / effect / closing.
 
-    | Signal Combination                            | Inferred Structure |
-    |------------------------------------------------|--------------------|
-    | Title text (first 3-5s) + BGM fade-in         | Hook               |
-    | Person close-up + speech > 30s                | Talking Head       |
-    | Rapid multi-shot alternation + high BPM       | Montage            |
-    | Text + price/CTA present                      | Conversion         |
-    | Fade to dark at end + logo                    | Outro              |
+    Opening  — first 10% of video, title/logo detected
+    Highlight — highest priority; high activity + emotion keywords
+    Transition — scene switch confidence > threshold
+    Effect    — very short segments (< 3s) with distinctive signal
+    Closing   — last 15% of video, fade-out / goodbye keywords
     """
 
-    # Duration threshold for Talking Head classification
-    TALKING_HEAD_MIN_DURATION = 30.0
+    # ── Position thresholds ──
+    OPENING_POSITION = 0.10       # first 10%
+    CLOSING_POSITION = 0.85       # last 15%
 
-    # BPM threshold for Montage classification
-    HIGH_BPM_THRESHOLD = 120
+    # ── Activity thresholds ──
+    HIGH_CUT_RATE = 2             # cuts per window → transition candidate
+    EFFECT_MAX_DURATION = 3.0     # seconds — effect cap
+    ENERGY_PEAK_RATIO = 1.8       # RMS > baseline * 1.8 → highlight signal
+
+    # ── Confidence base scores ──
+    CONF_OPENING = 0.80
+    CONF_HIGHLIGHT = 0.85
+    CONF_TRANSITION = 0.75
+    CONF_EFFECT = 0.65
+    CONF_CLOSING = 0.80
+    CONF_UNCLASSIFIED = 0.30
+
+    # ── Sliding window params ──
+    WINDOW_SIZE = 1.0             # seconds
+    WINDOW_STEP = 0.5             # seconds
+
+    # ── Visual feature thresholds ──
+    FLOW_HIGH_THRESHOLD = 15.0
+    FLOW_INTENSE_THRESHOLD = 25.0
+    SATURATION_VIVID = 100
+    SATURATION_HIGH = 150
+    HIST_DIST_THRESHOLD = 0.5
+    BRIGHTNESS_DARK = 20
+    BRIGHTNESS_FADE = 25
+    FACE_RATIO_TALKING = 0.08
+    FACE_RATIO_HIGHLIGHT = 0.12
+    EDGE_DENSITY_COMPLEX = 0.15
 
     def infer(
         self,
         frame_descriptions: List[dict],
         audio_data: dict,
         ocr_data: List[dict],
-        confidence_threshold: float = 0.6,
+        visual_features: Optional[List[dict]] = None,
+        confidence_threshold: float = 0.5,
     ) -> List[dict]:
-        """Infer narrative structure segments from combined signals.
-
-        Uses rule-based classification (no LLM needed) by partitioning the
-        video timeline at scene boundaries and silence gaps, then applying
-        classify_segment() rules to each window. Works fully offline when
-        frame_descriptions is empty — falls back to audio + OCR signals.
+        """Run 5-type sliding-window classification.
 
         Args:
-            frame_descriptions: Output from VisionAnalyzer.analyze().
-                Each dict has: frame_path, description, detected_objects, scene_type.
-                May be empty if no vision API is configured.
-            audio_data: Output from AudioAnalyzer.analyze().
-                Has: bpm, beat_times, energy_curve, silence_boundaries.
-            ocr_data: Output from OCRExtractor.extract().
-                Each dict has: frame_path, text_regions.
-            confidence_threshold: Minimum confidence to assign a structure type.
-                Segments below threshold are marked 'unclassified'.
+            frame_descriptions: Vision analyzer output (may be empty).
+            audio_data: Audio analyzer output (bpm, energy, silence, speech).
+            ocr_data: OCR results per frame.
+            confidence_threshold: Minimum confidence to emit a segment.
 
         Returns:
-            List of narrative segment dicts, each containing:
-                - start_time: float
-                - end_time: float
-                - structure_type: str (hook / talking_head / montage /
-                    conversion / outro / unclassified)
-                - confidence: float (0.0-1.0)
-                - evidence: List[str] human-readable reasons
+            List of dicts with: start_time, end_time, structure_type,
+            confidence, evidence.
         """
-        segments: List[dict] = []
-
-        # ── 1. Build timeline windows ──
-        total_duration = audio_data.get("duration", 0.0)
+        total_duration = self._resolve_duration(audio_data, ocr_data)
         if total_duration <= 0:
-            # Estimate from other sources
-            total_duration = max(
-                audio_data.get("total_duration", 0.0),
-                self._max_ocr_timestamp(ocr_data),
-            )
-
-        if total_duration <= 0:
-            return []  # Nothing to analyze
-
-        # Collect boundary points: scene boundaries + silence gaps
-        boundaries = set()
-
-        # Scene boundaries (from PySceneDetect)
-        for sb in audio_data.get("scene_boundaries", []):
-            if isinstance(sb, (int, float)):
-                boundaries.add(round(sb, 1))
-            elif isinstance(sb, dict):
-                boundaries.add(round(sb.get("timestamp", sb.get("start", 0)), 1))
-
-        # Silence boundaries (audio-based segmentation)
-        for sb in audio_data.get("silence_boundaries", []):
-            if isinstance(sb, (int, float)):
-                boundaries.add(round(sb, 1))
-            elif isinstance(sb, dict):
-                boundaries.add(round(sb.get("start", 0), 1))
-                boundaries.add(round(sb.get("end", 0), 1))
-            elif isinstance(sb, (tuple, list)) and len(sb) == 2:
-                boundaries.add(round(sb[0], 1))
-                boundaries.add(round(sb[1], 1))
-
-        # Also sample regular intervals if boundaries are sparse
-        window_size = 10.0
-        t = 0.0
-        while t < total_duration:
-            boundaries.add(round(t, 1))
-            t += window_size
-
-        boundaries.add(0.0)
-        boundaries.add(round(total_duration, 1))
-
-        sorted_bounds = sorted(b for b in boundaries if b <= total_duration)
-
-        if len(sorted_bounds) < 2:
             return []
 
-        # ── 2. Detect whether OCR / vision data is available ──
-        has_ocr = len(ocr_data) > 0
-        has_vision = len(frame_descriptions) > 0
+        if self.WINDOW_SIZE >= total_duration:
+            return []
 
-        # Count scene boundaries per window for montage detection
-        scene_boundaries_list = sorted(
-            b for b in audio_data.get("scene_boundaries", [])
-            if isinstance(b, (int, float))
-        )
+        # ── Pre-compute per-window signals ──
+        windows = self._build_windows(total_duration)
+        scene_bounds = self._extract_scene_boundaries(audio_data)
+        energy = audio_data.get("energy_curve", [])
+        speech_activity = self._speech_per_window(audio_data, windows)
 
-        # ── 3. Classify each window ──
-        for i in range(len(sorted_bounds) - 1):
-            seg_start = sorted_bounds[i]
-            seg_end = sorted_bounds[i + 1]
-            if seg_end - seg_start < 1.0:
-                continue  # Skip windows shorter than 1s
+        segments: List[dict] = []
 
-            # --- Extract signals ---
-            has_title_text = self._has_ocr_keyword(
-                ocr_data, seg_start, min(seg_start + 5, seg_end),
-                ["title", "标题", "第", "episode", "vol"],
-            )
-            has_price_cta = self._has_ocr_keyword(
-                ocr_data, seg_start, seg_end,
-                ["¥", "$", "€", "元", "价格", "buy", "购买", "点击", "subscribe",
-                 "订阅", "扫码", "咨询", "免费", "优惠", "限时"],
-            )
-            has_logo = self._has_ocr_keyword(
-                ocr_data, max(seg_start, seg_end - 10), seg_end,
-                ["logo", "关注", "follow", "subscribe", "订阅"],
-            )
-            speech_duration = self._speech_in_window(
-                audio_data, seg_start, seg_end
-            )
+        for w_start, w_end in windows:
+            w_dur = w_end - w_start
 
-            has_person_closeup = self._guess_person_presence(
-                frame_descriptions, seg_start, seg_end, speech_duration
-            )
+            # ── Position check ──
+            is_opening_zone = w_start < total_duration * self.OPENING_POSITION
+            is_closing_zone = w_start > total_duration * self.CLOSING_POSITION
 
-            bpm = audio_data.get("bpm", 0)
-            window_bpm = bpm
+            # ── Activity signals ──
+            cuts = self._cuts_in_window(scene_bounds, w_start, w_end)
+            cut_rate = cuts / w_dur if w_dur > 0 else 0
 
-            is_fade_out = self._is_fade_window(
-                audio_data, seg_start, seg_end, total_duration
-            )
+            energy_ratio = self._energy_peak_ratio(energy, total_duration, w_start, w_end)
 
-            window_descriptions = self._descriptions_in_window(
-                frame_descriptions, seg_start, seg_end
-            )
+            has_opening_ocr = self._has_ocr_keyword(ocr_data, w_start, w_end, _OPENING_KW)
+            has_highlight_ocr = self._has_ocr_keyword(ocr_data, w_start, w_end, _HIGHLIGHT_KW)
+            has_closing_ocr = self._has_ocr_keyword(ocr_data, w_start, w_end, _CLOSING_KW)
+            has_transition_ocr = self._has_ocr_keyword(ocr_data, w_start, w_end, _TRANSITION_KW)
 
-            # Count cuts in this window — high = montage
-            cuts_in_window = sum(
-                1 for b in scene_boundaries_list
-                if seg_start <= b <= seg_end
-            )
+            speech_sec = speech_activity.get((w_start, w_end), 0.0)
 
-            # --- Hierarchical classification ---
-            # Priority: position > activity > OCR/vision rules
-            if seg_start < 8.0 and i == 0:
-                structure_type = "hook"
-                confidence = 0.75
-                evidence = ["position_opening"]
-            elif seg_start > total_duration * 0.8:
-                structure_type = "outro"
-                confidence = 0.75
-                evidence = ["position_closing"]
-            elif cuts_in_window >= 2:
-                structure_type = "montage"
-                confidence = 0.65
-                evidence = [f"rapid_cuts_{cuts_in_window}"]
-            elif speech_duration > 45:
-                structure_type = "talking_head"
-                confidence = 0.68
-                evidence = ["sustained_speech"]
-            else:
-                # Fall through to signal-based classify_segment
-                structure_type, confidence, evidence = self.classify_segment(
-                    descriptions=window_descriptions,
-                    has_title_text=has_title_text,
-                    has_person_closeup=has_person_closeup,
-                    has_price_cta=has_price_cta,
-                    has_logo=has_logo,
-                    speech_duration=speech_duration,
-                    bpm=window_bpm,
-                    is_fade_out=is_fade_out,
-                )
+            is_fading = self._is_fading(audio_data, w_start, total_duration)
 
-            if confidence >= confidence_threshold:
-                segments.append({
-                    "start_time": seg_start,
-                    "end_time": seg_end,
-                    "structure_type": structure_type,
-                    "confidence": confidence,
-                    "evidence": evidence,
-                })
+            # ── Visual features (if available) ──
+            vw: dict = {}
+            if visual_features:
+                vw = self._aggregate_visual_window(visual_features, w_start, w_end)
 
-        # ── 3. Merge adjacent same-type segments ──
+            # ── Score each type ──
+            scores: List[Tuple[float, str, List[str]]] = []
+
+            # Opening
+            if is_opening_zone and w_start < 5.0:
+                conf = self.CONF_OPENING
+                ev = ["position_first_10pct"]
+                if has_opening_ocr:
+                    conf = min(conf + 0.08, 0.95)
+                    ev.append("opening_ocr_match")
+                if vw.get("face_presence") and vw.get("avg_face_ratio", 0) > self.FACE_RATIO_TALKING:
+                    conf = min(conf + 0.06, 0.95)
+                    ev.append("visual_talking_head")
+                if vw.get("avg_edge_density", 0) > self.EDGE_DENSITY_COMPLEX and not vw.get("face_presence"):
+                    conf = min(conf + 0.04, 0.95)
+                    ev.append("visual_complex_scene")
+                # YOLO: person in opening → talking-head or crowd intro
+                if vw.get("yolo_person_count", 0) >= 2:
+                    conf = min(conf + 0.04, 0.95)
+                    if vw.get("face_presence"):
+                        ev.append("yolo_talking_head")
+                    else:
+                        ev.append("yolo_crowd_intro")
+                scores.append((conf, TYPE_OPENING, ev))
+
+            # Highlight — any zone with high energy + emotion keywords
+            hl_conf = 0.0
+            hl_ev: List[str] = []
+            if energy_ratio > self.ENERGY_PEAK_RATIO:
+                hl_conf += 0.35
+                hl_ev.append(f"energy_peak_{energy_ratio:.1f}x")
+            if cut_rate > self.HIGH_CUT_RATE:
+                hl_conf += 0.20
+                hl_ev.append(f"cut_rate_{cut_rate:.1f}/s")
+            if has_highlight_ocr:
+                hl_conf += 0.20
+                hl_ev.append("highlight_ocr_match")
+            if speech_sec / max(w_dur, 0.1) > 0.7:
+                hl_conf += 0.10
+                hl_ev.append("high_speech_density")
+
+            if vw.get("avg_flow", 0) > self.FLOW_HIGH_THRESHOLD:
+                hl_conf += 0.15
+                hl_ev.append("visual_high_motion")
+            if vw.get("avg_saturation", 0) > self.SATURATION_VIVID and vw.get("avg_flow", 0) > 8.0:
+                hl_conf += 0.10
+                hl_ev.append("visual_vivid_motion")
+            if vw.get("face_presence") and vw.get("avg_face_ratio", 0) > self.FACE_RATIO_HIGHLIGHT:
+                hl_conf += 0.05
+                hl_ev.append("visual_face_highlight")
+            # YOLO: crowd / vehicle / animal in highlight zone → activity
+            if vw.get("yolo_person_count", 0) >= 3:
+                hl_conf += 0.08
+                hl_ev.append("yolo_crowd_activity")
+            if vw.get("yolo_vehicle_count", 0) >= 1:
+                hl_conf += 0.05
+                hl_ev.append("yolo_vehicle_action")
+            if vw.get("yolo_animal_count", 0) >= 1:
+                hl_conf += 0.03
+                hl_ev.append("yolo_animal_presence")
+
+            if hl_conf > 0.3:
+                scores.append((min(hl_conf, 0.95), TYPE_HIGHLIGHT, hl_ev))
+
+            # Transition
+            tr_conf = 0.0
+            tr_ev: List[str] = []
+            if cut_rate > 0.5:
+                tr_conf += 0.40
+                tr_ev.append(f"scene_switch_{cut_rate:.1f}/s")
+            if has_transition_ocr:
+                tr_conf += 0.20
+                tr_ev.append("transition_ocr")
+
+            # Check silence gap
+            if self._has_silence_gap(audio_data, w_start, w_end):
+                tr_conf += 0.15
+                tr_ev.append("silence_gap")
+
+            if vw.get("max_hist_dist", 0) > self.HIST_DIST_THRESHOLD:
+                tr_conf += 0.15
+                tr_ev.append("visual_color_shift")
+            if vw.get("min_brightness", 255) < self.BRIGHTNESS_DARK:
+                tr_conf += 0.10
+                tr_ev.append("visual_dark_transition")
+
+            if tr_conf > 0.35:
+                scores.append((min(tr_conf, 0.90), TYPE_TRANSITION, tr_ev))
+
+            # Effect — very short with distinct signal
+            if w_dur < self.EFFECT_MAX_DURATION and (energy_ratio > 2.0 or cut_rate > 3):
+                ef_conf = self.CONF_EFFECT + min(energy_ratio * 0.05, 0.15)
+                ef_ev = [f"short_segment_{w_dur:.1f}s"]
+                if vw.get("avg_flow", 0) > self.FLOW_INTENSE_THRESHOLD:
+                    ef_conf = min(ef_conf + 0.10, 0.90)
+                    ef_ev.append("visual_intense_motion")
+                if vw.get("avg_saturation", 0) > self.SATURATION_HIGH:
+                    ef_conf = min(ef_conf + 0.08, 0.90)
+                    ef_ev.append("visual_high_saturation")
+                scores.append((min(ef_conf, 0.90), TYPE_EFFECT, ef_ev))
+
+            # Closing
+            if is_closing_zone:
+                cl_conf = self.CONF_CLOSING
+                cl_ev = ["position_last_15pct"]
+                if has_closing_ocr:
+                    cl_conf = min(cl_conf + 0.08, 0.95)
+                    cl_ev.append("closing_ocr_match")
+                if is_fading:
+                    cl_conf = min(cl_conf + 0.05, 0.95)
+                    cl_ev.append("energy_fading")
+                if vw.get("min_brightness", 255) < self.BRIGHTNESS_FADE and vw.get("avg_flow", 99) < 3.0:
+                    cl_conf = min(cl_conf + 0.05, 0.95)
+                    cl_ev.append("visual_fade_out")
+                scores.append((cl_conf, TYPE_CLOSING, cl_ev))
+
+            # ── Pick best type ──
+            if scores:
+                scores.sort(key=lambda x: x[0], reverse=True)
+                best_conf, best_type, best_ev = scores[0]
+                if best_conf >= confidence_threshold:
+                    sub_type = self._derive_sub_type(best_type, best_ev)
+                    segments.append({
+                        "start_time": w_start,
+                        "end_time": w_end,
+                        "structure_type": best_type,
+                        "sub_type": sub_type,
+                        "confidence": round(best_conf, 2),
+                        "evidence": best_ev,
+                    })
+
+        # ── Non-maximum suppression: merge adjacent same-type ──
         merged = self._merge_adjacent(segments)
 
         return merged
 
+    # ── Window helpers ──
 
-    # ── Signal extraction helpers ──
+    def _build_windows(self, total_duration: float) -> List[Tuple[float, float]]:
+        windows: List[Tuple[float, float]] = []
+        t = 0.0
+        while t + self.WINDOW_SIZE <= total_duration:
+            windows.append((round(t, 1), round(t + self.WINDOW_SIZE, 1)))
+            t += self.WINDOW_STEP
+        # Last partial window
+        if t < total_duration:
+            windows.append((round(t, 1), round(total_duration, 1)))
+        return windows
 
     @staticmethod
-    def _max_ocr_timestamp(ocr_data: List[dict]) -> float:
-        """Get the latest timestamp from OCR data."""
-        max_t = 0.0
-        for item in ocr_data:
-            ts = item.get("timestamp", 0)
-            if ts > max_t:
-                max_t = ts
-        return max_t
+    def _resolve_duration(audio_data: dict, ocr_data: List[dict]) -> float:
+        dur = audio_data.get("duration", 0.0) or audio_data.get("total_duration", 0.0)
+        if dur <= 0 and ocr_data:
+            dur = max((d.get("timestamp", 0) for d in ocr_data), default=0.0)
+        return dur
+
+    @staticmethod
+    def _extract_scene_boundaries(audio_data: dict) -> List[float]:
+        sb = audio_data.get("scene_boundaries", [])
+        out: List[float] = []
+        for b in sb:
+            if isinstance(b, (int, float)):
+                out.append(float(b))
+            elif isinstance(b, dict):
+                out.append(float(b.get("timestamp", b.get("start", 0))))
+        return sorted(out)
+
+    @staticmethod
+    def _cuts_in_window(boundaries: List[float], start: float, end: float) -> int:
+        return sum(1 for b in boundaries if start <= b <= end)
+
+    @staticmethod
+    def _energy_peak_ratio(
+        energy: List[float], total_duration: float, start: float, end: float
+    ) -> float:
+        if not energy or total_duration <= 0:
+            return 1.0
+        n = len(energy)
+        i_s = int(start / total_duration * n)
+        i_e = int(end / total_duration * n)
+        i_s = max(0, min(i_s, n - 1))
+        i_e = max(i_s + 1, min(i_e, n))
+        window_vals = energy[i_s:i_e]
+        if not window_vals:
+            return 1.0
+        peak = max(window_vals)
+        baseline = sum(energy) / max(len(energy), 1)
+        if baseline <= 0:
+            return 1.0
+        return peak / baseline
 
     @staticmethod
     def _has_ocr_keyword(
-        ocr_data: List[dict],
-        t_start: float,
-        t_end: float,
-        keywords: List[str],
+        ocr_data: List[dict], start: float, end: float, keywords: List[str]
     ) -> bool:
-        """Check if any OCR text in the time window contains a keyword."""
         for item in ocr_data:
             ts = item.get("timestamp", -1)
-            if ts < 0 or ts < t_start or ts > t_end:
+            if ts < 0 or ts < start or ts > end:
                 continue
-            regions = item.get("text_regions", [])
-            if isinstance(regions, list):
-                for region in regions:
-                    text = ""
-                    if isinstance(region, dict):
-                        text = region.get("text", "")
-                    elif isinstance(region, str):
-                        text = region
-                    text_lower = text.lower()
-                    for kw in keywords:
-                        if kw.lower() in text_lower:
-                            return True
+            for region in item.get("text_regions", []):
+                text = ""
+                if isinstance(region, dict):
+                    text = region.get("text", "")
+                elif isinstance(region, str):
+                    text = region
+                text_lower = text.lower()
+                for kw in keywords:
+                    if kw.lower() in text_lower:
+                        return True
         return False
 
     @staticmethod
-    def _guess_person_presence(
-        frame_descriptions: List[dict],
-        t_start: float,
-        t_end: float,
-        speech_duration: float = 0.0,
-    ) -> bool:
-        """Check if vision API reported person close-ups in window.
+    def _is_fading(audio_data: dict, w_start: float, total_dur: float) -> bool:
+        if total_dur <= 0:
+            return False
+        if w_start < total_dur * 0.8:
+            return False
+        energy = audio_data.get("energy_curve", [])
+        n = len(energy)
+        if n < 4:
+            return w_start > total_dur * 0.9
+        i_start = int(w_start / total_dur * n)
+        i_end = min(i_start + int(n * 0.05), n)
+        i_start = max(0, min(i_start, n - 2))
+        i_end = max(i_start + 2, min(i_end, n))
+        if i_end - i_start < 2:
+            return w_start > total_dur * 0.9
+        first = sum(energy[i_start:i_start + 2]) / 2
+        last = sum(energy[i_end - 2:i_end]) / 2
+        return last < first * 0.7 if first > 0 else True
 
-        If no vision data available, falls back to a speech-duration
-        heuristic: sustained speech > 45s strongly suggests a person
-        speaking on camera (talking head format).
-        """
-        # First, check vision API data if available
-        for fd in frame_descriptions:
-            ts = fd.get("timestamp", -1)
-            if ts < 0 or ts < t_start or ts > t_end:
-                continue
-            scene_type = fd.get("scene_type", "")
-            objects = fd.get("detected_objects", [])
-            if scene_type == "talking_head":
-                return True
-            if "person" in objects or "face" in objects or "人物" in objects:
-                return True
-
-        # Fallback: no vision API — use speech duration as proxy
-        # Long continuous speech almost always means someone talking to camera
-        if speech_duration > 45.0:
-            return True
-
+    @staticmethod
+    def _has_silence_gap(audio_data: dict, start: float, end: float) -> bool:
+        for gap in audio_data.get("silence_boundaries", []):
+            if isinstance(gap, (tuple, list)) and len(gap) == 2:
+                if gap[0] <= start <= gap[1] or gap[0] <= end <= gap[1]:
+                    return True
+            elif isinstance(gap, dict):
+                gs = gap.get("start", -1)
+                ge = gap.get("end", -1)
+                if (gs <= start <= ge) or (gs <= end <= ge):
+                    return True
         return False
 
     @staticmethod
-    def _speech_in_window(
-        audio_data: dict,
-        t_start: float,
-        t_end: float,
-    ) -> float:
-        """Estimate total speech duration within the time window."""
-        total = 0.0
-        segments = audio_data.get("transcript_segments", [])
-        if not segments:
-            segments = audio_data.get("speech_segments", [])
+    def _speech_per_window(
+        audio_data: dict, windows: List[Tuple[float, float]]
+    ) -> Dict[Tuple[float, float], float]:
+        result: Dict[Tuple[float, float], float] = {}
+        segments = audio_data.get("transcript_segments") or audio_data.get("speech_segments") or []
         for seg in segments:
             s = seg.get("start", seg.get("start_time", 0))
             e = seg.get("end", seg.get("end_time", 0))
-            # Overlap with window
-            overlap_start = max(s, t_start)
-            overlap_end = min(e, t_end)
-            if overlap_end > overlap_start:
-                total += overlap_end - overlap_start
-        return total
+            for ws, we in windows:
+                overlap = min(e, we) - max(s, ws)
+                if overlap > 0:
+                    result[(ws, we)] = result.get((ws, we), 0.0) + overlap
+        return result
 
     @staticmethod
-    def _is_fade_window(
-        audio_data: dict,
-        t_start: float,
-        t_end: float,
-        total_duration: float,
-    ) -> bool:
-        """Check if this window is near the end and has fading audio."""
-        # Must be in the last 20% of the video
-        if total_duration <= 0:
-            return False
-        if t_start < total_duration * 0.8:
-            return False
-        # Check for decreasing energy
-        energy = audio_data.get("energy_curve", [])
-        if not energy:
-            return True  # Near end with no energy data → likely outro
-        # Simple check: split window energy, compare first half vs second
-        n = len(energy)
-        if n < 4:
-            return True
-        # Map window to energy indices (rough)
-        duration = audio_data.get("duration", total_duration)
-        if duration <= 0:
-            return True
-        i_start = int(t_start / duration * n)
-        i_end = int(t_end / duration * n)
-        i_start = max(0, min(i_start, n - 1))
-        i_end = max(i_start + 1, min(i_end, n))
-        window_energy = energy[i_start:i_end]
-        if len(window_energy) < 2:
-            return True
-        mid = len(window_energy) // 2
-        first_half = sum(window_energy[:mid]) / max(mid, 1)
-        second_half = sum(window_energy[mid:]) / max(len(window_energy) - mid, 1)
-        return second_half < first_half * 0.7
+    def _aggregate_visual_window(
+        visual_features: List[dict], start: float, end: float
+    ) -> dict:
+        """Aggregate visual features within a time window.
 
-    @staticmethod
-    def _descriptions_in_window(
-        frame_descriptions: List[dict],
-        t_start: float,
-        t_end: float,
-    ) -> List[str]:
-        """Collect natural-language descriptions from vision API in window."""
-        texts: List[str] = []
-        for fd in frame_descriptions:
-            ts = fd.get("timestamp", -1)
-            if ts < 0 or ts < t_start or ts > t_end:
-                continue
-            desc = fd.get("description", "")
-            if desc:
-                texts.append(desc)
-        return texts
+        Frames are matched to the window by their frame_index. Returns a dict
+        of aggregated values keyed by: face_presence, avg_face_ratio, avg_flow,
+        avg_saturation, avg_edge_density, avg_entropy, min_brightness,
+        max_hist_dist. All values are 0 if no frames match the window.
+        """
+        n = len(visual_features)
+        if n == 0:
+            return {}
+
+        # Estimate which frame indices fall in the window
+        total = max(vf.get("frame_index", 0) for vf in visual_features) + 1
+        if total <= 1:
+            total = n
+        i_s = max(0, int(start / max(end, 0.01) * total))
+        i_e = min(n, int(end / max(end, 0.01) * total) + 1)
+        i_s = max(0, min(i_s, n - 1))
+        i_e = max(i_s + 1, min(i_e, n))
+
+        frames = visual_features[i_s:i_e]
+        if not frames:
+            return {}
+
+        face_count = sum(f.get("face_count", 0) for f in frames)
+        face_ratios = [f.get("face_area_ratio", 0) for f in frames]
+        flows = [f.get("optical_flow_magnitude", 0) for f in frames]
+        sats = [f.get("saturation_mean", 0) for f in frames]
+        edges = [f.get("edge_density", 0) for f in frames]
+        entropies = [f.get("gray_entropy", 0) for f in frames]
+        brightnesses = [f.get("brightness_mean", 0) for f in frames]
+        hist_dists = [f.get("histogram_distance", 0) for f in frames]
+
+        # ── YOLO aggregation ──
+        yolo_person = sum(f.get("yolo_person_count", 0) for f in frames)
+        yolo_vehicle = sum(f.get("yolo_vehicle_count", 0) for f in frames)
+        yolo_animal = sum(f.get("yolo_animal_count", 0) for f in frames)
+        yolo_total = sum(f.get("yolo_total_objects", 0) for f in frames)
+        yolo_classes: List[str] = []
+        for f in frames:
+            dom = f.get("yolo_dominant_class", "")
+            if dom:
+                yolo_classes.append(dom)
+
+        return {
+            "face_presence": face_count > 0,
+            "avg_face_ratio": sum(face_ratios) / len(face_ratios),
+            "avg_flow": sum(flows) / len(flows),
+            "avg_saturation": sum(sats) / len(sats),
+            "avg_edge_density": sum(edges) / len(edges),
+            "avg_entropy": sum(entropies) / len(entropies),
+            "min_brightness": min(brightnesses) if brightnesses else 255,
+            "max_hist_dist": max(hist_dists) if hist_dists else 0.0,
+            # YOLO
+            "yolo_person_count": yolo_person,
+            "yolo_vehicle_count": yolo_vehicle,
+            "yolo_animal_count": yolo_animal,
+            "yolo_total_objects": yolo_total,
+            "yolo_dominant_classes": yolo_classes,
+        }
 
     @staticmethod
     def _merge_adjacent(segments: List[dict]) -> List[dict]:
-        """Merge adjacent segments that share the same structure_type.
-
-        Unclassified segments are never merged — they represent
-        distinct sections of the video that should remain separate.
-        """
         if not segments:
             return []
         merged = [segments[0].copy()]
         for seg in segments[1:]:
             prev = merged[-1]
             if (
-                prev["structure_type"] != "unclassified"
-                and prev["structure_type"] == seg["structure_type"]
-                and abs(prev["end_time"] - seg["start_time"]) < 2.0
+                prev["structure_type"] == seg["structure_type"]
+                and prev["structure_type"] != TYPE_UNCLASSIFIED
+                and abs(prev["end_time"] - seg["start_time"]) < 1.5
             ):
-                # Merge: extend previous segment
                 prev["end_time"] = seg["end_time"]
                 prev["confidence"] = max(prev["confidence"], seg["confidence"])
-                prev["evidence"].extend(
-                    e for e in seg["evidence"] if e not in prev["evidence"]
-                )
+                for e in seg["evidence"]:
+                    if e not in prev["evidence"]:
+                        prev["evidence"].append(e)
             else:
                 merged.append(seg.copy())
         return merged
 
-    def classify_segment(
-        self,
-        descriptions: List[str],
-        has_title_text: bool,
-        has_person_closeup: bool,
-        has_price_cta: bool,
-        has_logo: bool,
-        speech_duration: float,
-        bpm: float,
-        is_fade_out: bool,
-    ) -> tuple:
-        """Classify a single time segment based on signal evidence.
+    # ──────────────────────────────────────────────────────
+    #  Sub-type derivation: evidence → Chinese label
+    # ──────────────────────────────────────────────────────
 
-        Args:
-            descriptions: Vision descriptions for frames in this segment.
-            has_title_text: Whether title-style text is detected.
-            has_person_closeup: Whether a person close-up is detected.
-            has_price_cta: Whether price/CTA text is detected.
-            has_logo: Whether a logo is detected.
-            speech_duration: Total speech duration in this segment (seconds).
-            bpm: Estimated BPM for this segment.
-            is_fade_out: Whether segment ends with fade-out.
+    @staticmethod
+    def _derive_sub_type(structure_type: str, evidence: list) -> str:
+        """Map evidence signals to a domain-specific Chinese sub-label."""
+        ev_set = set(evidence)
 
-        Returns:
-            Tuple of (structure_type, confidence, evidence_list).
-        """
-        evidence: List[str] = []
+        if structure_type == "opening":
+            if "opening_ocr_match" in ev_set:
+                if any(e in ev_set for e in ("visual_talking_head", "visual_face_highlight")):
+                    return "人物介绍"
+                return "标题展示"
+            if "yolo_crowd_intro" in ev_set:
+                return "群像引入"
+            if "visual_complex_scene" in ev_set:
+                return "场景建置"
+            if "visual_talking_head" in ev_set:
+                return "开场对话"
+            return "片头引入"
 
-        # Rule 1: Hook — title at start with BGM
-        if has_title_text:
-            evidence.append("title_text_detected")
-            return ("hook", 0.85, evidence)
+        if structure_type == "highlight":
+            has_motion = any("visual_high_motion" in e or e.startswith("cut_rate_") for e in ev_set)
+            has_energy = any(e.startswith("energy_peak_") for e in ev_set)
+            if "yolo_vehicle_action" in ev_set and has_motion:
+                return "追逐/竞速"
+            if "yolo_crowd_activity" in ev_set and has_motion:
+                return "群像混战"
+            if "yolo_animal_presence" in ev_set:
+                return "动物特写"
+            if has_motion and has_energy and "visual_vivid_motion" in ev_set:
+                return "动作高燃"
+            if "highlight_ocr_match" in ev_set and "visual_high_motion" in ev_set:
+                return "名场面"
+            if "visual_face_highlight" in ev_set:
+                return "人物高光"
+            if "high_speech_density" in ev_set:
+                return "对话高潮"
+            if has_energy and has_motion:
+                return "激烈冲突"
+            if has_energy:
+                return "情绪爆发"
+            return "精彩片段"
 
-        # Rule 2: Talking Head — person close-up with sustained speech
-        if has_person_closeup and speech_duration > self.TALKING_HEAD_MIN_DURATION:
-            evidence.append("person_closeup_with_speech")
-            return ("talking_head", 0.80, evidence)
+        if structure_type == "transition":
+            if "silence_gap" in ev_set and "visual_dark_transition" in ev_set:
+                return "段落切换"
+            if "transition_ocr" in ev_set:
+                return "时间跳转"
+            if "visual_color_shift" in ev_set and "visual_dark_transition" in ev_set:
+                return "场景切换"
+            if "visual_color_shift" in ev_set:
+                return "画面切换"
+            return "场景转换"
 
-        # Rule 3: Montage — high BPM with rapid cuts
-        if bpm >= self.HIGH_BPM_THRESHOLD:
-            evidence.append("high_bpm")
-            return ("montage", 0.70, evidence)
+        if structure_type == "effect":
+            dur_ev = next((e for e in ev_set if e.startswith("short_segment_")), "")
+            if "visual_intense_motion" in ev_set and "visual_high_saturation" in ev_set:
+                return "视觉特效"
+            if "visual_intense_motion" in ev_set:
+                return "快节奏闪切"
+            return "短效插入"
 
-        # Rule 4: Conversion — price/CTA present
-        if has_price_cta:
-            evidence.append("price_cta_detected")
-            return ("conversion", 0.90, evidence)
+        if structure_type == "closing":
+            if "visual_fade_out" in ev_set and "energy_fading" in ev_set:
+                return "淡出结尾"
+            if "closing_ocr_match" in ev_set:
+                if "visual_fade_out" in ev_set:
+                    return "片尾字幕"
+                return "片尾致谢"
+            if "energy_fading" in ev_set:
+                return "情绪回落"
+            if "visual_fade_out" in ev_set:
+                return "淡出结尾"
+            return "结尾收束"
 
-        # Rule 5: Outro — fade-out with logo
-        if is_fade_out and has_logo:
-            evidence.append("fade_out_with_logo")
-            return ("outro", 0.85, evidence)
-
-        # Unclassified
-        evidence.append("insufficient_signal")
-        return ("unclassified", 0.30, evidence)
+        return "未分类"

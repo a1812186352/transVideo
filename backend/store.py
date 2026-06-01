@@ -10,6 +10,57 @@ import threading
 from typing import Any, Dict, Optional
 
 
+# ── VisionConfig: persisted vision provider settings ──
+
+DEFAULT_VISION_CONFIG: Dict[str, Any] = {
+    "provider": "local",       # "local" | "api"
+    "api_url": "",
+    "api_key": "",
+    "model": "qwen-vl-max",
+}
+
+_VISION_CONFIG_PATH: str = ""
+
+
+def _ensure_config_path(base_dir: str = "") -> str:
+    global _VISION_CONFIG_PATH
+    if not _VISION_CONFIG_PATH:
+        _VISION_CONFIG_PATH = os.path.join(
+            base_dir or os.getcwd(), "job_store", "vision_config.json"
+        )
+    return _VISION_CONFIG_PATH
+
+
+def load_vision_config(base_dir: str = "") -> Dict[str, Any]:
+    """Load vision config from disk, falling back to defaults."""
+    path = _ensure_config_path(base_dir)
+    try:
+        if os.path.exists(path):
+            with open(path, "r", encoding="utf-8") as f:
+                data: dict = json.load(f)
+                # Merge with defaults so new keys don't break old configs
+                merged = dict(DEFAULT_VISION_CONFIG)
+                merged.update(data)
+                return merged
+    except (json.JSONDecodeError, OSError):
+        pass
+    return dict(DEFAULT_VISION_CONFIG)
+
+
+def save_vision_config(config: Dict[str, Any], base_dir: str = "") -> Dict[str, Any]:
+    """Validate and persist vision config to disk."""
+    merged = dict(DEFAULT_VISION_CONFIG)
+    merged.update(config)
+    # Clamp provider
+    if merged["provider"] not in ("local", "api"):
+        merged["provider"] = "local"
+    path = _ensure_config_path(base_dir)
+    os.makedirs(os.path.dirname(path), exist_ok=True)
+    with open(path, "w", encoding="utf-8") as f:
+        json.dump(merged, f, indent=2, ensure_ascii=False)
+    return merged
+
+
 class JobStore:
     """Dict-like key-value store backed by per-key JSON files.
 

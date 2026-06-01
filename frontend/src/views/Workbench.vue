@@ -1,17 +1,11 @@
 <template>
-  <div
-    class="workbench"
-    :style="workbenchStyle"
-  >
+  <div class="workbench" :style="workbenchStyle">
     <!-- ═══ Top bar ═══ -->
-    <header class="zone zone--topbar">
-      <div class="zone__title">TransVideo</div>
-      <div class="zone__center" />
-      <div class="zone__actions">
-        <button class="zone__btn" @click="toggleTheme" title="切换主题">🌓</button>
-        <button class="zone__btn" @click="openSettings" title="设置">⚙</button>
-      </div>
-    </header>
+    <TopBar
+      class="zone zone--topbar"
+      @upload="onTopBarUpload"
+      @settings="ws.settingsOpen = true"
+    />
 
     <!-- ═══ Material panel (left) ═══ -->
     <aside class="zone zone--material" :style="{ width: leftWidth }">
@@ -22,21 +16,14 @@
         </button>
       </div>
       <div class="zone__body">
-        <slot name="material">
-          <div class="zone__placeholder">素材面板</div>
-        </slot>
+        <MaterialPanel :api-base-url="project.apiBaseUrl" />
       </div>
     </aside>
 
     <!-- ═══ Preview (center) ═══ -->
     <main class="zone zone--preview">
-      <div class="zone__header">
-        <span class="zone__label">预览</span>
-      </div>
       <div class="zone__body">
-        <slot name="preview">
-          <div class="zone__placeholder">预览区域</div>
-        </slot>
+        <PreviewPanel @upload="ws.triggerVideoUpload()" />
       </div>
     </main>
 
@@ -49,9 +36,7 @@
         </button>
       </div>
       <div class="zone__body">
-        <slot name="property">
-          <div class="zone__placeholder">属性面板</div>
-        </slot>
+        <PropertyPanel />
       </div>
     </aside>
 
@@ -64,28 +49,48 @@
         </button>
       </div>
       <div class="zone__body">
-        <slot name="generate">
-          <div class="zone__placeholder">生成面板</div>
-        </slot>
+        <GeneratePanel />
       </div>
     </aside>
 
     <!-- ═══ Timeline (bottom) ═══ -->
     <footer class="zone zone--timeline">
-      <div class="zone__header">
-        <span class="zone__label">时间线</span>
-      </div>
       <div class="zone__body">
-        <slot name="timeline">
-          <div class="zone__placeholder">时间线区域</div>
-        </slot>
+        <TimelineBar />
       </div>
     </footer>
+
+    <!-- ═══ Settings modal (kept here, rendered by workbench store) ═══ -->
+    <Teleport to="body">
+      <div v-if="ws.settingsOpen" class="modal-overlay" @click.self="ws.settingsOpen = false">
+        <div class="modal">
+          <div class="modal__header">
+            <h2>设置</h2>
+            <button class="modal__close" @click="ws.settingsOpen = false">×</button>
+          </div>
+          <div class="modal__body">
+            <ApiSettingsPanelStatic />
+          </div>
+        </div>
+      </div>
+    </Teleport>
   </div>
 </template>
 
 <script setup lang="ts">
 import { ref, computed } from 'vue';
+import { useProjectStore } from '../stores/project';
+import { useWorkbenchStore } from '../stores/workbench';
+import TopBar from '../components/TopBar.vue';
+import MaterialPanel from '../components/MaterialPanel.vue';
+import PreviewPanel from '../components/PreviewPanel.vue';
+import PropertyPanel from '../components/PropertyPanel.vue';
+import GeneratePanel from '../components/GeneratePanel.vue';
+import TimelineBar from '../components/TimelineBar.vue';
+import ApiSettingsPanelStatic from '../components/ApiSettingsPanelStatic.vue';
+
+const project = useProjectStore();
+const ws = useWorkbenchStore();
 
 // ── Panel collapse state ──
 const leftCollapsed = ref(false);
@@ -106,9 +111,10 @@ const workbenchStyle = computed(() => ({
   '--gen-width': genWidth.value,
 }));
 
-// ── Theme ──
-const toggleTheme = () => (globalThis as any).__toggleTheme?.();
-const openSettings = () => (globalThis as any).__openSettings?.();
+// ── Wire TopBar upload event → workbench store ──
+function onTopBarUpload(file: File) {
+  ws.doUpload(file);
+}
 </script>
 
 <style scoped>
@@ -146,11 +152,11 @@ const openSettings = () => (globalThis as any).__openSettings?.();
 }
 
 /* ── Zone areas ── */
-.zone--topbar    { grid-area: topbar; flex-direction: row; align-items: center; background: var(--bg-surface); border-bottom: 1px solid var(--border); padding: 0 12px; }
+.zone--topbar    { grid-area: topbar; padding: 0; border-right: none; background: transparent; }
 .zone--material  { grid-area: material; }
 .zone--preview   { grid-area: preview; border-right: none; background: var(--bg-root); }
 .zone--property  { grid-area: property; }
-.zone--generate  { grid-area: generate; }
+.zone--generate  { grid-area: generate; border-right: none; }
 .zone--timeline  { grid-area: timeline; flex-direction: row; border-top: 1px solid var(--border); background: var(--bg-surface); }
 
 /* ── Zone header ── */
@@ -166,11 +172,6 @@ const openSettings = () => (globalThis as any).__openSettings?.();
   font-weight: 600;
   color: var(--text-secondary);
   user-select: none;
-}
-.zone--topbar .zone__header { display: none; }
-.zone--preview .zone__header,
-.zone--timeline .zone__header {
-  border-bottom: none;
 }
 .zone__label {
   overflow: hidden;
@@ -198,49 +199,40 @@ const openSettings = () => (globalThis as any).__openSettings?.();
 /* ── Zone body ── */
 .zone__body {
   flex: 1;
-  overflow-y: auto;
-  overflow-x: hidden;
-  scrollbar-width: thin;
-  scrollbar-color: var(--border) transparent;
-}
-
-/* ── Zone placeholder ── */
-.zone__placeholder {
+  overflow: hidden;
   display: flex;
-  align-items: center;
-  justify-content: center;
-  height: 100%;
-  color: var(--text-muted);
-  font-size: 13px;
+  flex-direction: column;
 }
 
-/* ── Top bar specifics ── */
-.zone__center {
-  flex: 1;
-}
-.zone__actions {
-  display: flex;
-  gap: 4px;
-}
-.zone__btn {
-  background: none;
-  border: none;
-  color: var(--text-secondary);
-  cursor: pointer;
-  font-size: 15px;
-  padding: 4px 6px;
-  border-radius: var(--radius-sm);
-  transition: background var(--transition);
-}
-.zone__btn:hover {
-  background: var(--bg-hover);
-  color: var(--text-primary);
+/* ── Timeline body ── */
+.zone--timeline .zone__body {
+  flex-direction: column;
 }
 
-/* ── Collapsed state ── */
-.zone--material:not([style*="width: 0px"]),
-.zone--property:not([style*="width: 0px"]),
-.zone--generate:not([style*="width: 0px"]) {
-  /* visible */;
+/* ═══════════════════════════════════════
+   Settings modal (shared styles)
+   ═══════════════════════════════════════ */
+:global(.modal-overlay) {
+  position: fixed; inset: 0; z-index: 1000;
+  background: rgba(0, 0, 0, 0.5);
+  display: flex; align-items: center; justify-content: center;
 }
+:global(.modal) {
+  background: var(--bg-panel); color: var(--text-primary);
+  border: 1px solid var(--border); border-radius: var(--radius-lg);
+  box-shadow: var(--shadow-md);
+  width: 480px; max-height: 80vh; overflow-y: auto;
+}
+:global(.modal__header) {
+  display: flex; align-items: center; justify-content: space-between;
+  padding: 16px 20px; border-bottom: 1px solid var(--border);
+}
+:global(.modal__header h2) { font-size: 16px; font-weight: 600; }
+:global(.modal__close) {
+  width: 28px; height: 28px; border: 1px solid var(--border); border-radius: var(--radius-sm);
+  background: transparent; color: var(--text-muted); font-size: 16px; cursor: pointer;
+  display: flex; align-items: center; justify-content: center;
+}
+:global(.modal__close:hover) { color: var(--text-primary); }
+:global(.modal__body) { padding: 16px 20px; }
 </style>

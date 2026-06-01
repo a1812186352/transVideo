@@ -1,9 +1,12 @@
 """Video upload router: receives video files and returns video_id."""
 
+import base64
 import os
 import uuid
+import cv2
 import aiofiles
-from fastapi import APIRouter, UploadFile, File, HTTPException
+from fastapi import APIRouter, UploadFile, File, HTTPException, Query
+from typing import List
 
 from backend.models.script import UploadResponse
 
@@ -139,3 +142,58 @@ async def serve_video(video_id: str):
             "Accept-Ranges": "bytes",
         },
     )
+
+
+@router.get("/video/{video_id}/thumbnails")
+async def get_thumbnails(video_id: str, interval: float = Query(3.0, ge=0.5, le=60.0)) -> List[dict]:
+    """Extract thumbnails from video at regular intervals.
+
+    Uses OpenCV to decode frames, resize to 120px width, and return
+    as base64-encoded JPEG data URIs with timestamps.
+
+    Args:
+        video_id: The video ID returned from upload.
+        interval: Seconds between thumbnails (default 3, range 0.5-60).
+
+    Returns:
+        List of dicts: {timestamp, data_uri}
+    """
+    found = None
+    for fname in os.listdir(UPLOAD_DIR):
+        if fname.startswith(video_id):
+            found = os.path.join(UPLOAD_DIR, fname)
+            break
+    if not found:
+        raise HTTPException(status_code=404, detail="Video not found")
+
+    cap = cv2.VideoCapture(found)
+    if not cap.isOpened():
+        raise HTTPException(status_code=500, detail="Cannot open video file")
+
+    fps = cap.get(cv2.CAP_PROP_FPS)
+    total_frames = int(cap.get(cv2.CAP_PROP_FRAME_COUNT))
+    duration = total_frames / fps if fps > 0 else 0
+
+    thumbnails: List[dict] = []
+    t = 0.0
+    max_width = 120
+
+    while t < duration:
+        frame_idx = int(t * fps)
+        cap.set(cv2.CAP_PROP_POS_FRAMES, frame_idx)
+        ret, frame = cap.read()
+        if not ret:
+            break
+
+        h, w = frame.shape[:2]
+        scale = max_width / w
+        new_h = int(h * scale)
+        thumb = cv2.resize(frame, (max_width, new_h), interpolation=cv2.INTER_AREA)
+        _, buf = cv2.imencode(".jpg", thumb, [cv2.IMWRITE_JPEG_QUALITY, 70])
+        data_uri = f"data:image/jpeg;base64,{base64.b64encode(buf).decode('utf-8')}"
+
+        thumbnails.append({"timestamp": round(t, 1), "data_uri": data_uri})
+        t += interval
+
+    cap.release()
+    return thumbnails

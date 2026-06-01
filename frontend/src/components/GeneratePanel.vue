@@ -19,7 +19,7 @@
           <span>{{ statusLabel }}</span>
         </div>
         <div class="gen__eta" v-if="totalDuration > 0 && exportStatus !== 'completed'">
-          预计耗时：{{ fmtEta(totalDuration) }}
+          预计耗时：{{ ws.fmtEta(totalDuration) }}
         </div>
       </div>
 
@@ -88,15 +88,19 @@
 </template>
 
 <script setup lang="ts">
-import { ref, computed, watch } from 'vue';
+import { ref, computed } from 'vue';
 import { useProjectStore } from '../stores/project';
-import type { ExportResult } from '../types/script';
+import { useWorkbenchStore } from '../stores/workbench';
 
 const store = useProjectStore();
+const ws = useWorkbenchStore();
 
-// ── Export state ──
-const exportDownloadUrl = ref<string | null>(null);
-const exportResolution = ref('1920x1080');
+// ── Export state (from workbench store) ──
+const exportDownloadUrl = computed(() => ws.exportDownloadUrl);
+const exportResolution = computed({
+  get: () => ws.exportResolution,
+  set: (v) => ws.exportResolution = v,
+});
 const exportFps = ref(30);
 const exportProgress = ref(0);
 
@@ -124,91 +128,28 @@ const statusDotClass = computed(() => {
   return m[store.exportStatus] || '';
 });
 
-// ── ETA formatter ──
-const fmtEta = (durSec: number): string => {
-  const fps = store.script.metadata.fps || 30;
-  const isApi = store.visionProvider === 'api' && !!store.visionApiUrl;
-  const kf = Math.max(1, Math.ceil((durSec * fps) / (fps / 5) / Math.max(1, Math.ceil(durSec / 10))));
-
-  const base = durSec * 0.25;
-  const whisper = durSec * 0.6;
-  const audio = durSec * 0.08;
-  const ocr = kf * 0.12;
-  const yolo = kf * 0.06;
-  const api = isApi ? kf * 0.4 : 0;
-
-  const total = Math.ceil((base + whisper + audio + ocr + yolo + api) * 1.15);
-  if (total < 60) return `约 ${total} 秒`;
-  const min = Math.floor(total / 60);
-  const sec = total % 60;
-  return sec > 0 ? `约 ${min} 分 ${sec} 秒` : `约 ${min} 分钟`;
-};
-
 // ── History ──
 interface HistoryItem { name: string; size: string; url?: string; }
 const history = ref<HistoryItem[]>([]);
 
-// ── Export logic ──
-async function doExport() {
-  if (!store.videoId || store.modules.length === 0) return;
-  store.setExportStatus('processing');
-  store.clearError();
+// ── Export: delegate to workbench store ──
+function doExport() {
+  ws.handleExport();
+  // Track progress via polling (handled in store, but we animate locally)
   exportProgress.value = 0;
-  exportDownloadUrl.value = null;
-
-  const [w, h] = exportResolution.value.split('x').map(Number);
-  store.setMetadata({ resolution: { width: w, height: h } });
-
-  try {
-    const base = store.apiBaseUrl.replace(/\/+$/, '');
-    const scriptToSend = {
-      ...store.script,
-      metadata: { ...store.script.metadata, fps: exportFps.value },
-    };
-
-    const res = await fetch(`${base}/export/${store.videoId}`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(scriptToSend),
-    });
-    if (!res.ok) throw new Error(`导出请求失败: HTTP ${res.status}`);
-
-    // Poll
-    for (let i = 0; i < 600; i++) {
-      await sleep(2000);
-      exportProgress.value = Math.min(95, Math.round((i / 300) * 100));
-
-      const pollRes = await fetch(`${base}/export/${store.videoId}`);
-      if (!pollRes.ok) throw new Error(`轮询失败: HTTP ${pollRes.status}`);
-
-      const result: ExportResult = await pollRes.json();
-      if (result.status === 'completed') {
-        store.setExportStatus('completed');
-        exportProgress.value = 100;
-        if (result.output_path) {
-          exportDownloadUrl.value = `${base}${result.output_path}`;
-          // Add to history
-          const name = result.output_path.split('/').pop() || 'output.mp4';
-          history.value.unshift({ name, size: result.size_bytes ? fmtSize(result.size_bytes) : '—', url: exportDownloadUrl.value });
-        }
-        return;
+  const iv = setInterval(() => {
+    if (store.exportStatus === 'completed' || store.exportStatus === 'failed') {
+      exportProgress.value = store.exportStatus === 'completed' ? 100 : 0;
+      // Add to local history when done
+      if (store.exportStatus === 'completed' && ws.exportDownloadUrl) {
+        const name = ws.exportDownloadUrl.split('/').pop() || 'output.mp4';
+        history.value.unshift({ name, size: '—', url: ws.exportDownloadUrl });
       }
-      if (result.status === 'failed') throw new Error(result.error ?? '导出失败');
+      clearInterval(iv);
+    } else {
+      exportProgress.value = Math.min(95, exportProgress.value + Math.random() * 8);
     }
-    throw new Error('导出超时');
-  } catch (err: any) {
-    store.setExportStatus('failed');
-    store.setError(err.message ?? '导出失败');
-  }
-}
-
-function sleep(ms: number) { return new Promise(r => setTimeout(r, ms)); }
-
-function fmtSize(bytes: number): string {
-  if (!bytes) return '—';
-  if (bytes < 1024) return `${bytes} B`;
-  if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`;
-  return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
+  }, 2000);
 }
 
 function downloadItem(item: HistoryItem) {

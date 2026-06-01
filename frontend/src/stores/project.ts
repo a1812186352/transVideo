@@ -10,7 +10,7 @@ import type {
 
 /** Known stale defaults to auto-purge from localStorage */
 const STALE_DEFAULTS: Record<string, string> = {
-  apiBaseUrl: 'http://localhost:8001',
+  apiBaseUrl: 'http://localhost:8000',
 };
 
 /** Load a value from localStorage, falling back to a default */
@@ -80,6 +80,10 @@ export const useProjectStore = defineStore('project', () => {
   const llmApiKey = ref<string>(loadPersisted('llmApiKey', ''));
   const llmApiUrl = ref<string>(loadPersisted('llmApiUrl', ''));
   const modelName = ref<string>(loadPersisted('modelName', 'qwen-vl-max'));
+  const visionProvider = ref<string>(loadPersisted('visionProvider', 'local'));
+  const visionApiUrl = ref<string>(loadPersisted('visionApiUrl', ''));
+  const visionApiKey = ref<string>(loadPersisted('visionApiKey', ''));
+  const visionModel = ref<string>(loadPersisted('visionModel', 'qwen-vl-max'));
   const errorMessage = ref<string | null>(null);
 
   // --- Getters ---
@@ -251,6 +255,26 @@ export const useProjectStore = defineStore('project', () => {
     persist('modelName', name);
   }
 
+  function setVisionProvider(p: string) {
+    visionProvider.value = p;
+    persist('visionProvider', p);
+  }
+
+  function setVisionApiUrl(url: string) {
+    visionApiUrl.value = url;
+    persist('visionApiUrl', url);
+  }
+
+  function setVisionApiKey(key: string) {
+    visionApiKey.value = key;
+    persist('visionApiKey', key);
+  }
+
+  function setVisionModel(m: string) {
+    visionModel.value = m;
+    persist('visionModel', m);
+  }
+
   function setError(message: string | null) {
     errorMessage.value = message;
   }
@@ -268,6 +292,10 @@ export const useProjectStore = defineStore('project', () => {
     watch(llmApiKey, (v) => persist('llmApiKey', v));
     watch(llmApiUrl, (v) => persist('llmApiUrl', v));
     watch(modelName, (v) => persist('modelName', v));
+    watch(visionProvider, (v) => persist('visionProvider', v));
+    watch(visionApiUrl, (v) => persist('visionApiUrl', v));
+    watch(visionApiKey, (v) => persist('visionApiKey', v));
+    watch(visionModel, (v) => persist('visionModel', v));
   }
   wirePersist();
 
@@ -287,6 +315,10 @@ export const useProjectStore = defineStore('project', () => {
     llmApiKey,
     llmApiUrl,
     modelName,
+    visionProvider,
+    visionApiUrl,
+    visionApiKey,
+    visionModel,
     errorMessage,
     // Getters
     modules,
@@ -316,6 +348,10 @@ export const useProjectStore = defineStore('project', () => {
     setLlmApiKey,
     setLlmApiUrl,
     setModelName,
+    setVisionProvider,
+    setVisionApiUrl,
+    setVisionApiKey,
+    setVisionModel,
     setError,
     clearError,
   };

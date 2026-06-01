@@ -25,8 +25,9 @@ class FrameExtractor:
             ``{work_dir}/frames/{video_id}/``.
     """
 
-    def __init__(self, work_dir: str = "") -> None:
+    def __init__(self, work_dir: str = "", downscale: bool = True) -> None:
         self.work_dir = work_dir
+        self.downscale = downscale  # analyze at 480p for speed
 
     def extract(
         self, video_path: str, frame_indices: List[int], video_id: str = ""
@@ -71,6 +72,9 @@ class FrameExtractor:
 
                 filename = f"frame_{idx:06d}.png"
                 filepath = os.path.join(output_dir, filename)
+                if self.downscale and frame.shape[1] > 854:
+                    h = int(frame.shape[0] * 854 / frame.shape[1])
+                    frame = cv2.resize(frame, (854, h), interpolation=cv2.INTER_AREA)
                 cv2.imwrite(filepath, frame)
                 extracted_paths.append(os.path.abspath(filepath))
 
