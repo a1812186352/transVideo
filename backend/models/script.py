@@ -44,6 +44,7 @@ class Module(BaseModel):
     source: Optional[SourceMaterial] = None
     params: Optional[ModuleParams] = None
     children: List["Module"] = []
+    detail: Optional[Dict[str, Any]] = None
 
 
 class Track(BaseModel):

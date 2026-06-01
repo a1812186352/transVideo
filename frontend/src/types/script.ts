@@ -63,6 +63,7 @@ export interface Module {
   source?: SourceMaterial;
   params?: ModuleParams;
   children: Module[];
+  detail?: Record<string, any>;
 }
 
 /** A timeline track definition */

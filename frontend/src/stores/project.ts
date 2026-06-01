@@ -10,7 +10,7 @@ import type {
 
 /** Known stale defaults to auto-purge from localStorage */
 const STALE_DEFAULTS: Record<string, string> = {
-  apiBaseUrl: 'http://localhost:8000',
+  apiBaseUrl: 'http://localhost:8001',
 };
 
 /** Load a value from localStorage, falling back to a default */

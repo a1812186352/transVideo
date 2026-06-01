@@ -82,14 +82,33 @@ class OCRExtractor:
         _ensure_deps()
         return self._ocr_frame(frame_path)
 
+    # ── Text size rank thresholds (bbox height / image height) ──
+
+    _SIZE_LARGE_RATIO = 0.20
+    _SIZE_MEDIUM_RATIO = 0.05
+    _LOW_CONFIDENCE = 0.4
+
     def _ocr_frame(self, frame_path: str) -> List[dict]:
-        """Run Tesseract on a single image and return structured regions."""
+        """Run Tesseract on a single image and return structured regions.
+
+        Full-frame OCR (no region cropping).  Results are sorted by
+        bounding-box area (largest first) so LOGO / title text takes
+        priority over subtitles / edge text.
+
+        Each region includes:
+            - text, confidence, bbox (existing)
+            - text_size_rank:  "large" | "medium" | "small"
+            - low_confidence:  bool  (True when confidence < 0.4)
+        """
         try:
             img = _Image.open(frame_path)
         except Exception:
             return []
 
-        # Use image_to_data for detailed output (word-level bbox + confidence)
+        img_w, img_h = img.size
+
+        # Use image_to_data for detailed output (word-level bbox + confidence).
+        # Default PSM 3 is used — full-page auto); no region cropping applied.
         try:
             data = _pytesseract.image_to_data(
                 img, lang=self.lang,
@@ -117,10 +136,24 @@ class OCRExtractor:
             w = int(data["width"][i])
             h = int(data["height"][i])
 
+            # Size rank
+            height_ratio = h / img_h if img_h > 0 else 0.0
+            if height_ratio >= self._SIZE_LARGE_RATIO:
+                size_rank = "large"
+            elif height_ratio >= self._SIZE_MEDIUM_RATIO:
+                size_rank = "medium"
+            else:
+                size_rank = "small"
+
             regions.append({
                 "text": text,
                 "confidence": confidence,
                 "bbox": [[x, y], [x + w, y], [x + w, y + h], [x, y + h]],
+                "text_size_rank": size_rank,
+                "low_confidence": confidence < self._LOW_CONFIDENCE,
             })
+
+        # Sort by bounding-box area descending — large LOGO text first
+        regions.sort(key=lambda r: (r["bbox"][2][0] - r["bbox"][0][0]) * (r["bbox"][2][1] - r["bbox"][0][1]), reverse=True)
 
         return regions

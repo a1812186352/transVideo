@@ -256,14 +256,17 @@ class VisualFeatureExtractor:
         hsv = cv2.cvtColor(img, cv2.COLOR_BGR2HSV)
 
         # Face detection
-        fc, far = self._detect_faces(gray, w, h)
+        fc, far, face_rects = self._detect_faces(gray, w, h)
 
         # Brightness
         bm = float(gray.mean())
         bs = float(gray.std())
 
-        # Saturation
+        # Saturation (global mean — kept for backward compatibility)
         sm = float(hsv[:, :, 1].mean())
+
+        # HSV partition-based color analysis (replaces naive global mean)
+        color_stats = self._analyze_color_hsv(hsv)
 
         # Edge density
         edges = cv2.Canny(gray, 50, 150)
@@ -276,6 +279,11 @@ class VisualFeatureExtractor:
 
         # YOLO object detection
         yolo_result = self._detect_yolo(img)
+
+        # Post-process: false-positive filtering (tiny-bbox, minimal-frame, face corroboration)
+        yolo_result = self._validate_yolo(
+            yolo_result, h, w, hsv, edges, gray, face_rects,
+        )
 
         # Composition analysis (content-agnostic, based on bbox + edge stats)
         comp_type, comp_conf = self._analyze_composition(
@@ -295,8 +303,14 @@ class VisualFeatureExtractor:
             "yolo_animal_count": yolo_result["animal_count"],
             "yolo_dominant_class": yolo_result["dominant_class"],
             "yolo_total_objects": yolo_result["total"],
+            "yolo_quality_flag": yolo_result["quality_flag"],
             "composition_type": comp_type,
             "composition_confidence": comp_conf,
+            # HSV partition-based color analysis
+            "color_zone_pcts": color_stats["zone_pcts"],
+            "dominant_color_zone": color_stats["dominant"],
+            "is_dominantly_neutral": color_stats["is_neutral"],
+            "avg_hue": color_stats["avg_hue"],
         }
 
     def extract_pair(self, prev_path: str, curr_path: str) -> dict:
@@ -419,6 +433,136 @@ class VisualFeatureExtractor:
             "animal_count": animal_count,
             "dominant_class": dominant_class,
             "total": len(objects),
+            "quality_flag": "reliable",
+        }
+
+    # ── YOLO false-positive validation ──
+
+    # Thresholds
+    _MIN_BBOX_AREA_RATIO = 0.015       # bbox area < 1.5% of frame
+    _LOW_CONFIDENCE = 0.6
+    _MINIMAL_EDGE_DENSITY = 0.03      # edge_density below this → "minimal" frame
+    _MINIMAL_HSV_VAR = 0.02           # HSV variance below this → uniform background
+    _BATCH_FP_COUNT = 5               # ≥5 same-class → potential batch false positive
+    _FACE_OVERLAP_MIN = 0.15           # bbox–face IoU ≥ 15% to corroborate "person"
+
+    def _validate_yolo(
+        self,
+        yolo: dict,
+        h: int, w: int,
+        hsv: np.ndarray,
+        edges: np.ndarray,
+        gray: np.ndarray,
+        face_rects: List[Tuple[int, int, int, int]],
+    ) -> dict:
+        """Post-process YOLO results with three false-positive filters.
+
+        Filter 1 — tiny low-confidence discard:
+            bbox_area / frame_area < 1.5% AND confidence < 0.6 → remove.
+
+        Filter 2 — minimal-frame batch suppression:
+            ≥5 same-class detections AND frame is "minimal" (edge_density
+            low + HSV variance low) → mark all objects
+            ``likely_false_positive: true``.
+
+        Filter 3 — person face corroboration:
+            "person" bboxes that do NOT overlap any Haar face detection
+            are marked ``likely_false_positive: true``.
+
+        After all filters, sets ``quality_flag``:
+            - "rejected"   — all objects filtered / flagged
+            - "suspicious" — at least one likely_false_positive
+            - "reliable"   — no issues
+        """
+        objs = yolo.get("objects", [])
+        frame_area = h * w
+
+        # ── Minimal-frame check (runs first — shared across filters) ──
+        h_n = hsv[:, :, 0].astype(np.float32) / 179.0
+        s_n = hsv[:, :, 1].astype(np.float32) / 255.0
+        v_n = hsv[:, :, 2].astype(np.float32) / 255.0
+        hsv_var = float(np.var(h_n) + np.var(s_n) + np.var(v_n))
+        ed = float(np.count_nonzero(edges)) / frame_area if frame_area > 0 else 0.0
+        is_minimal_frame = ed < self._MINIMAL_EDGE_DENSITY and hsv_var < self._MINIMAL_HSV_VAR
+
+        # ── Count same-class for batch detection ──
+        class_counts: Dict[str, int] = {}
+        for obj in objs:
+            class_counts[obj.get("class_name", "")] = class_counts.get(obj.get("class_name", ""), 0) + 1
+
+        # ── IoU helper ──
+        def _iou(a: Tuple[int, int, int, int], b: list) -> float:
+            """IoU between Haar rect (x,y,w,h) and YOLO bbox [x1,y1,x2,y2]."""
+            ax, ay, aw, ah = a
+            bx1, by1, bx2, by2 = b[0], b[1], b[2], b[3]
+            ix = max(ax, bx1); iy = max(ay, by1)
+            ix2 = min(ax + aw, bx2); iy2 = min(ay + ah, by2)
+            if ix >= ix2 or iy >= iy2:
+                return 0.0
+            inter = (ix2 - ix) * (iy2 - iy)
+            a_area = aw * ah
+            b_area = max((bx2 - bx1) * (by2 - by1), 1)
+            return inter / min(a_area, b_area) if min(a_area, b_area) > 0 else 0.0
+
+        filtered: list = []
+        any_fp = False
+
+        for obj in objs:
+            cls = obj.get("class_name", "")
+            conf = obj.get("confidence", 0.0)
+            bbox = obj.get("bbox", [0, 0, 0, 0])
+
+            # ── Filter 1: tiny low-confidence → skip ──
+            bbox_area = ((bbox[2] - bbox[0]) * (bbox[3] - bbox[1])) if len(bbox) >= 4 else 0
+            area_ratio = bbox_area / frame_area if frame_area > 0 else 0.0
+            if area_ratio < self._MIN_BBOX_AREA_RATIO and conf < self._LOW_CONFIDENCE:
+                continue  # discard
+
+            likely_fp = False
+
+            # ── Filter 2: minimal-frame batch suppression ──
+            if is_minimal_frame and class_counts.get(cls, 0) >= self._BATCH_FP_COUNT:
+                likely_fp = True
+
+            # ── Filter 3: person face corroboration ──
+            if cls == "person" and face_rects:
+                has_face = any(
+                    _iou(face_rect, bbox) > self._FACE_OVERLAP_MIN
+                    for face_rect in face_rects
+                )
+                if not has_face:
+                    likely_fp = True
+                    # Reduce confidence weight for unverified person
+                    obj["confidence"] = round(conf * 0.5, 3)
+
+            obj["likely_false_positive"] = likely_fp
+            if likely_fp:
+                any_fp = True
+            filtered.append(obj)
+
+        # ── Determine quality flag ──
+        if not filtered:
+            quality = "rejected"
+        elif any_fp:
+            quality = "suspicious"
+        else:
+            quality = "reliable"
+
+        # Re-count after filtering
+        person_cnt = sum(1 for o in filtered if o.get("class_name") == "person")
+        vehicle_cnt = sum(1 for o in filtered if o.get("class_name") in _VEHICLE_CLASSES)
+        animal_cnt = sum(1 for o in filtered if o.get("class_name") in _ANIMAL_CLASSES)
+        cls_counts = Counter(o.get("class_name", "") for o in filtered)
+        dom = max(cls_counts, key=cls_counts.get) if cls_counts else ""
+
+        return {
+            "objects": filtered,
+            "person_count": person_cnt,
+            "vehicle_count": vehicle_cnt,
+            "animal_count": animal_cnt,
+            "dominant_class": dom,
+            "total": len(filtered),
+            "quality_flag": quality,
         }
 
     def _load_yolo(self):
@@ -467,15 +611,16 @@ class VisualFeatureExtractor:
                 self._cascade_failed = True
         return self._cascade
 
-    def _detect_faces(self, gray: np.ndarray, w: int, h: int) -> Tuple[int, float]:
+    def _detect_faces(self, gray: np.ndarray, w: int, h: int) -> Tuple[int, float, List[Tuple[int, int, int, int]]]:
         cascade = self._load_cascade()
         if cascade is None:
-            return 0, 0.0
+            return 0, 0.0, []
         faces = cascade.detectMultiScale(
             gray, scaleFactor=1.1, minNeighbors=5, minSize=self.face_min_size
         )
-        area = sum(fw * fh for (_, _, fw, fh) in faces) / (w * h) if w * h > 0 else 0.0
-        return len(faces), area
+        face_rects = [(int(x), int(y), int(fw), int(fh)) for (x, y, fw, fh) in faces]
+        area = sum(fw * fh for _, _, fw, fh in face_rects) / (w * h) if w * h > 0 else 0.0
+        return len(faces), area, face_rects
 
     # ── Composition analysis ──
 
@@ -686,6 +831,92 @@ class VisualFeatureExtractor:
 
         return type_label.get(best_type, "unknown"), round(best_score, 3)
 
+    # ── HSV partition-based color analysis ──
+
+    def _analyze_color_hsv(self, hsv: np.ndarray) -> dict:
+        """Partition pixels into HSV zones for robust color dominance detection.
+
+        Replaces the naive global HSV mean which gets biased by small warm
+        regions on mostly-white backgrounds.
+
+        Zones (mutually exclusive, checked in order):
+          1. 白色/浅灰  — S < 0.1  and  V > 0.8
+          2. 暗色       — V < 0.2
+          3. 暖色       — H in [0°,30°] ∪ [330°,360°]  and  S > 0.15
+          4. 冷色       — H in [180°,270°]              and  S > 0.15
+          5. 中性       — everything else
+
+        Returns:
+            dict with keys:
+                zone_pcts:  {zone_label: percentage}  (5 zones, sum ≈ 100)
+                dominant:    zone_label with highest percentage
+                is_neutral:  True if dominant zone is 白色/浅灰 / 暗色 / 中性
+                avg_hue:     global H mean (reference, 0-179 OpenCV range)
+        """
+        h, s, v = hsv[:, :, 0], hsv[:, :, 1], hsv[:, :, 2]
+        total = h.size
+        shape = h.shape
+        if total == 0:
+            return {
+                "zone_pcts": {"白色/浅灰": 0.0, "暗色": 0.0, "暖色": 0.0, "冷色": 0.0, "中性": 0.0},
+                "dominant": "中性",
+                "is_neutral": True,
+                "avg_hue": 0.0,
+            }
+
+        # Normalise to [0, 1] for threshold clarity
+        s_norm = s.astype(np.float32) / 255.0
+        v_norm = v.astype(np.float32) / 255.0
+        # H stays in OpenCV 0-179 (divide by 179 ≈ normalised hue)
+
+        # Exclusive zone mask (neutral = 4 default) — keep 2D shape
+        zones = np.full(shape, 4, dtype=np.uint8)
+
+        # 1) 白色/浅灰: S < 0.1  and  V > 0.8
+        mask = (s_norm < 0.1) & (v_norm > 0.8)
+        zones[mask] = 0
+
+        # 2) 暗色: V < 0.2 (overrides everything except white)
+        mask = (v_norm < 0.2) & (zones == 4)
+        zones[mask] = 1
+
+        # 3) 暖色: H in [0°,30°] or [330°,360°] in true hue
+        #    OpenCV H 0-179 → true_hue = H × 2
+        #    so 0-30 true → H 0-15;  330-360 true → H 165-179
+        warm_mask = ((h <= 15) | (h >= 165)) & (s_norm > 0.15)
+        mask = warm_mask & (zones == 4)
+        zones[mask] = 2
+
+        # 4) 冷色: H in [180°,270°] true → H 90-135
+        cool_mask = (h >= 90) & (h <= 135) & (s_norm > 0.15)
+        mask = cool_mask & (zones == 4)
+        zones[mask] = 3
+
+        # 5) 中性: everything still at 4
+
+        # ── Percentages ──
+        counts = np.bincount(zones.ravel(), minlength=5).astype(np.float64)
+        pcts = (counts / total * 100.0).tolist()
+        zone_labels = ["白色/浅灰", "暗色", "暖色", "冷色", "中性"]
+        zone_pcts = dict(zip(zone_labels, [round(p, 2) for p in pcts]))
+
+        # ── Dominant ──
+        dominant_idx = int(np.argmax(counts))
+        dominant = zone_labels[dominant_idx]
+
+        # ── Neutral flag: white / dark / neutral backgrounds ──
+        is_neutral = dominant_idx in (0, 1, 4)
+
+        # ── Reference: global H mean ──
+        avg_hue = float(np.mean(h))
+
+        return {
+            "zone_pcts": zone_pcts,
+            "dominant": dominant,
+            "is_neutral": is_neutral,
+            "avg_hue": avg_hue,
+        }
+
 
 # ── Helpers ──
 
@@ -706,6 +937,7 @@ def _empty_yolo_result() -> dict:
         "animal_count": 0,
         "dominant_class": "",
         "total": 0,
+        "quality_flag": "reliable",
     }
 
 
@@ -723,6 +955,11 @@ def _zero_features(frame_path: str, index: int) -> dict:
         "yolo_animal_count": 0,
         "yolo_dominant_class": "",
         "yolo_total_objects": 0,
+        "yolo_quality_flag": "reliable",
         "composition_type": "unknown",
         "composition_confidence": 0.0,
+        "color_zone_pcts": {"白色/浅灰": 0.0, "暗色": 0.0, "暖色": 0.0, "冷色": 0.0, "中性": 0.0},
+        "dominant_color_zone": "中性",
+        "is_dominantly_neutral": True,
+        "avg_hue": 0.0,
     }

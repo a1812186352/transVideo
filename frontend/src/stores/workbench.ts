@@ -27,6 +27,26 @@ export const useWorkbenchStore = defineStore('workbench', () => {
   const exportBitrate = ref(8);
   const exportSubtitles = ref(true);
   const exportFormat = ref('mp4');
+  const videoType = ref('vlog');
+  // prettier-ignore
+  const VIDEO_TYPE_OPTIONS = [
+    { value: 'vlog',     label: '生活Vlog' },
+    { value: 'travel',   label: '旅行记录' },
+    { value: 'food',     label: '美食制作' },
+    { value: 'edu',      label: '教学教程' },
+    { value: 'tech',     label: '科技数码' },
+    { value: 'game',     label: '游戏剪辑' },
+    { value: 'sport',    label: '运动健身' },
+    { value: 'music',    label: '音乐MV' },
+    { value: 'dance',    label: '舞蹈表演' },
+    { value: 'pet',      label: '宠物日常' },
+    { value: 'fashion',  label: '时尚穿搭' },
+    { value: 'beauty',   label: '美妆护肤' },
+    { value: 'news',     label: '新闻资讯' },
+    { value: 'comedy',   label: '搞笑娱乐' },
+    { value: 'film',     label: '影视剪辑' },
+    { value: 'other',    label: '其他类型' },
+  ];
 
   /* ═══════════════════════════════════
      Monitor / Log
@@ -70,7 +90,13 @@ export const useWorkbenchStore = defineStore('workbench', () => {
       const m = modules.find(x => x.start_time === sceneTimes[i]);
       const type = m ? typeLabel(m.type) : '视频段';
       const typeMap: Record<string, string> = { title: '开头 Opening', video_segment: '高潮 Highlight', transition: '转场 Transition', effect: '特效 Effect' };
-      pushLog('规则引擎', `片段 ${i} (${fmtDuration(sceneTimes[i])}): 匹配规则 → 类型: <b>${typeMap[type] || type}</b> (置信度: <b>${(0.88 + Math.random() * 0.11).toFixed(2)}</b>)`, 'data', '✅', true);
+      // 置信度来自 pipeline 计算的 energy_peak_value（音频能量峰值，0~1）
+      const detail = (m as any)?.detail;
+      const confidence = detail?.energy_peak_value != null
+        ? (detail.energy_peak_value as number).toFixed(2)
+        : null;
+      const confStr = confidence ? ` (峰值: <b>${confidence}</b>)` : '';
+      pushLog('规则引擎', `片段 ${i} (${fmtDuration(sceneTimes[i])}): 匹配规则 → 类型: <b>${typeMap[type] || type}</b>${confStr}`, 'data', '✅', true);
     }
     pushLog('规则引擎', `候选排序完成，共 <b>${modules.length}</b> 个模块候选`, 'ok', '✅');
     const elapsed = ((Date.now() - _monitorStart) / 1000).toFixed(2);
@@ -124,6 +150,10 @@ export const useWorkbenchStore = defineStore('workbench', () => {
     const m: Record<string, string> = { idle: '', uploading: 'badge--uploading', done: 'badge--done', error: 'badge--error' };
     return m[project.uploadStatus] || '';
   });
+
+  /* ═══════════════════════════════════
+     Video type presets
+     ═══════════════════════════════════ */
 
   /* ═══════════════════════════════════
      Module helpers
@@ -275,10 +305,7 @@ export const useWorkbenchStore = defineStore('workbench', () => {
       const res = await fetch(`${base}/upload`, { method: 'POST', body: fd });
       if (!res.ok) throw new Error(`Upload failed: HTTP ${res.status}`);
       const data: UploadResult = await res.json();
-      project.setVideoId(data.video_id);
-      project.setUploadStatus('done');
-      uploadFileSize.value = data.size_bytes || file.size;
-      uploadFileName.value = file.name;
+      // ── 先设 metadata，再设 videoId，确保 watch(videoId) 触发时 metadata 已就绪 ──
       project.setMetadata({
         title: file.name,
         fps: data.fps ?? 30,
@@ -286,6 +313,10 @@ export const useWorkbenchStore = defineStore('workbench', () => {
         resolution: { width: data.width ?? 1920, height: data.height ?? 1080 },
         source_video_id: data.video_id,
       });
+      project.setVideoId(data.video_id);
+      project.setUploadStatus('done');
+      uploadFileSize.value = data.size_bytes || file.size;
+      uploadFileName.value = file.name;
       startMonitor();
       pushLog('Pipeline', `视频已上传：${file.name} (${fmtSize(data.size_bytes || file.size)})`);
       pushLog('Pipeline', `分辨率 ${data.width}x${data.height}，时长 ${fmtDuration(data.duration || 0)}，帧率 ${data.fps || 30} fps`);
@@ -318,25 +349,72 @@ export const useWorkbenchStore = defineStore('workbench', () => {
     startMonitor();
     try {
       const base = project.apiBaseUrl.replace(/\/+$/, '');
-      const res = await fetch(`${base}/analyze/${project.videoId}`, { method: 'POST' });
+      // 1) 提交分析任务
+      const res = await fetch(`${base}/analyze/${project.videoId}?video_type=${videoType.value}`, { method: 'POST' });
       if (!res.ok) throw new Error(`Analyze request failed: HTTP ${res.status}`);
-      pushLog('Pipeline', '分析请求已提交，等待结果…');
+      pushLog('Pipeline', '分析任务已提交，建立实时推送连接…');
 
-      for (let i = 0; i < 600; i++) {
-        pushLog('Pipeline', `轮询第 ${i + 1} 次…`);
-        await sleep(2000);
-        const pollRes = await fetch(`${base}/analyze/${project.videoId}`);
-        if (!pollRes.ok) throw new Error(`Poll failed: HTTP ${pollRes.status}`);
-        const result: AnalysisResult = await pollRes.json();
-        if (result.status === 'completed') {
-          project.setAnalysisStatus('completed');
-          if (result.script) project.setScript(result.script);
-          finishMonitor(result.script?.modules || []);
-          return;
-        }
-        if (result.status === 'failed') throw new Error(result.error ?? 'Analysis failed');
+      // 2) 通过 SSE 实时接收 segment 事件
+      const sseUrl = `${base}/analyze/${project.videoId}/stream`;
+      const es = new EventSource(sseUrl);
+
+      const completed = await new Promise<{ moduleCount: number }>((resolve, reject) => {
+        const timeout = setTimeout(() => {
+          es.close();
+          reject(new Error('分析超时（20 分钟）'));
+        }, 20 * 60 * 1000);
+
+        es.onmessage = (event) => {
+          try {
+            const data = JSON.parse(event.data);
+            if (data.type === 'segment') {
+              const mod = data.module;
+              pushLog('Segment', `#${data.index} ${mod.type} @ ${fmtDuration(mod.start_time)} — ${mod.label || ''}`, 'data', '📦');
+            } else if (data.type === 'done') {
+              clearTimeout(timeout);
+              resolve({ moduleCount: data.total });
+            } else if (data.type === 'error') {
+              clearTimeout(timeout);
+              reject(new Error(data.message || '分析异常'));
+            }
+          } catch { /* ignore parse errors */ }
+        };
+
+        es.onerror = () => {
+          clearTimeout(timeout);
+          reject(new Error('SSE 连接中断'));
+        };
+      });
+
+      es.close();
+      pushLog('Pipeline', `实时推送完成，共接收 <b>${completed.moduleCount}</b> 个模块，获取完整脚本…`, 'ok', '✅');
+
+      // 3) 拉取完整结果（含 metadata / tracks）
+      const finalRes = await fetch(`${base}/analyze/${project.videoId}`);
+      if (!finalRes.ok) throw new Error(`获取分析结果失败: HTTP ${finalRes.status}`);
+      const result: AnalysisResult = await finalRes.json();
+      if (result.script) {
+        // 保留上传阶段更准确的元数据（cv2 实测分辨率/帧率，用户文件名）
+        const prevMeta = project.script.metadata;
+        const merged = {
+          ...result.script,
+          metadata: {
+            ...result.script.metadata,
+            title: prevMeta.title || result.script.metadata.title,
+            fps: prevMeta.fps || result.script.metadata.fps,
+            total_duration: prevMeta.total_duration || result.script.metadata.total_duration,
+            resolution: {
+              width: prevMeta.resolution.width || result.script.metadata.resolution.width,
+              height: prevMeta.resolution.height || result.script.metadata.resolution.height,
+            },
+          },
+        };
+        project.setScript(merged);
+        project.setAnalysisStatus('completed');
+        finishMonitor(merged.metadata.total_duration ? merged.modules : result.script.modules);
+      } else {
+        throw new Error('分析结果为空（后端未返回 script）');
       }
-      throw new Error('分析超时');
     } catch (err: any) {
       project.setAnalysisStatus('failed');
       project.setError(err.message ?? '分析失败');
@@ -462,7 +540,7 @@ export const useWorkbenchStore = defineStore('workbench', () => {
     // UI state
     settingsOpen, dragOver, exportDownloadUrl, uploadFileSize, uploadFileName,
     videoCurrentTime, analysisActualTime, viewMode, moduleScript, showExportFmt,
-    exportResolution, exportBitrate, exportSubtitles, exportFormat,
+    exportResolution, exportBitrate, exportSubtitles, exportFormat, videoType, VIDEO_TYPE_OPTIONS,
     // Monitor
     monitorLogs, onMonitorScroll, pushLog, startMonitor, finishMonitor, stopMonitor,
     // File input
@@ -471,6 +549,7 @@ export const useWorkbenchStore = defineStore('workbench', () => {
     onVideoTimeUpdate, videoSrc, seekVideo,
     // Status
     statusLabel, statusBadgeClass,
+
     // Module helpers
     typeIcon, typeLabel,
     // Detail

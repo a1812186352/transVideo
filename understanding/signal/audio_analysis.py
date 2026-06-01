@@ -113,6 +113,16 @@ class AudioAnalyzer:
                 beat_times=beat_times,
             )
 
+            # Mood classification (6-class: calm / cheerful / tense / melancholy / neutral / energetic)
+            silence_ratio = float(sum(end - start for start, end in silence_boundaries) / duration) if duration > 0 else 0.0
+            mood, mood_confidence, mood_secondary = self._classify_mood(
+                bpm=bpm,
+                rms_mean=rms_mean,
+                rms_np=rms_np,
+                spectral_centroid=spectral_centroid,
+                silence_ratio=silence_ratio,
+            )
+
             return {
                 "_status": "success",
                 "bpm": bpm,
@@ -129,6 +139,9 @@ class AudioAnalyzer:
                 "energy_variation": energy_variation,
                 "bgm_type": bgm_type,
                 "bgm_confidence": bgm_confidence,
+                "mood": mood,
+                "mood_confidence": mood_confidence,
+                "mood_secondary": mood_secondary,
             }
         finally:
             # Clean up temp audio file
@@ -411,3 +424,112 @@ class AudioAnalyzer:
             return "无法判定", round(best_score, 3)
 
         return best_type, round(best_score, 3)
+
+    # ── Mood classification ──
+
+    def _classify_mood(
+        self,
+        bpm: float,
+        rms_mean: float,
+        rms_np: np.ndarray,
+        spectral_centroid: float,
+        silence_ratio: float,
+    ) -> Tuple[str, float, str]:
+        """Fine-grained 6-class mood classification using rule-based scoring.
+
+        Mood types:
+            calm       — BPM < 80, low energy, low centroid, high silence
+            cheerful   — BPM > 100, bright centroid, stable energy
+            tense      — BPM > 100, high energy variance
+            melancholy — BPM < 90, low energy, low centroid
+            neutral    — BPM 80–110, medium energy
+            energetic  — BPM > 120, high energy
+
+        Args:
+            bpm: Estimated tempo.
+            rms_mean: Mean RMS energy (raw, before dB conversion).
+            rms_np: RMS energy curve (numpy array) for variance calc.
+            spectral_centroid: Mean spectral centroid in Hz.
+            silence_ratio: Fraction of audio that is silent (0–1).
+
+        Returns:
+            (mood, confidence, secondary_mood) — confidence in [0, 1],
+            secondary is empty if no meaningful runner-up.
+        """
+        rms_cv = float(np.std(rms_np) / (rms_mean + 1e-10))
+
+        # ── Scoring helpers ──
+
+        def _lin(val: float, lo: float, hi: float) -> float:
+            if val <= lo:
+                return 0.0
+            if val >= hi:
+                return 1.0
+            return (val - lo) / (hi - lo)
+
+        def _tri(val: float, centre: float, half: float) -> float:
+            d = abs(val - centre)
+            return max(0.0, 1.0 - d / half) if half > 0 else 1.0 if d == 0 else 0.0
+
+        def _gauss(val: float, centre: float, sigma: float) -> float:
+            return float(np.exp(-0.5 * ((val - centre) / sigma) ** 2))
+
+        scores: dict = {}
+
+        # ── calm  — BPM<80, RMS<0.1, low centroid, moderate+ silence ──
+        scores["calm"] = (
+            (1.0 - _lin(bpm, 60, 90)) * 0.30 +
+            (1.0 - _lin(rms_mean, 0.04, 0.12)) * 0.30 +
+            (1.0 - _lin(spectral_centroid, 800, 2000)) * 0.25 +
+            _lin(silence_ratio, 0.02, 0.15) * 0.15
+        )
+
+        # ── cheerful  — BPM>100, centroid>2000, stable RMS, low silence ──
+        scores["cheerful"] = (
+            _lin(bpm, 95, 140) * 0.30 +
+            _lin(spectral_centroid, 1800, 4000) * 0.25 +
+            (1.0 - _lin(rms_cv, 0.20, 0.45)) * 0.30 +
+            (1.0 - _lin(silence_ratio, 0.05, 0.20)) * 0.15
+        )
+
+        # ── tense  — BPM>100, high RMS variance, mid-high centroid ──
+        scores["tense"] = (
+            _lin(bpm, 100, 150) * 0.30 +
+            _lin(rms_cv, 0.30, 0.60) * 0.35 +
+            _gauss(spectral_centroid, 2500, 1200) * 0.20 +
+            (1.0 - _lin(silence_ratio, 0.05, 0.15)) * 0.15
+        )
+
+        # ── melancholy  — BPM<90, low RMS, low centroid, high silence ──
+        scores["melancholy"] = (
+            (1.0 - _lin(bpm, 55, 95)) * 0.25 +
+            (1.0 - _lin(rms_mean, 0.03, 0.10)) * 0.30 +
+            (1.0 - _lin(spectral_centroid, 800, 2000)) * 0.25 +
+            _lin(silence_ratio, 0.05, 0.25) * 0.20
+        )
+
+        # ── neutral  — BPM 80–110, RMS medium, centroid medium ──
+        scores["neutral"] = (
+            _tri(bpm, 95, 25) * 0.30 +
+            _gauss(rms_mean, 0.08, 0.04) * 0.30 +
+            _gauss(spectral_centroid, 1800, 800) * 0.25 +
+            _tri(silence_ratio, 0.05, 0.08) * 0.15
+        )
+
+        # ── energetic  — BPM>120, high RMS, mid-high centroid ──
+        scores["energetic"] = (
+            _lin(bpm, 120, 180) * 0.35 +
+            _lin(rms_mean, 0.12, 0.25) * 0.35 +
+            _gauss(spectral_centroid, 2500, 1200) * 0.15 +
+            (1.0 - _lin(silence_ratio, 0.02, 0.10)) * 0.15
+        )
+
+        # ── Select primary & secondary ──
+        ranked = sorted(scores.items(), key=lambda x: x[1], reverse=True)
+        best_name, best_score = ranked[0]
+        second_name, second_score = ranked[1] if len(ranked) > 1 else ("", 0.0)
+
+        confidence = min(max(best_score, 0.0), 1.0)
+        secondary = second_name if second_score > 0.30 else ""
+
+        return best_name, round(confidence, 3), secondary

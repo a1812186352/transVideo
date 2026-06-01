@@ -42,18 +42,18 @@ def _push_event(video_id: str, event: dict) -> None:
     q.put(event)
 
 
-def _run_analysis_streaming(video_id: str, video_path: str) -> None:
+def _run_analysis_streaming(video_id: str, video_path: str, video_type: str = "vlog") -> None:
     """Run pipeline in a background thread, push events to SSE queue."""
     import logging
     _log = logging.getLogger(__name__)
-    print(f"[SSE] Analysis thread started for {video_id}", flush=True)
+    print(f"[SSE] Analysis thread started for {video_id} (type={video_type})", flush=True)
     t0 = time.time()
     try:
         pipeline = Pipeline(
             work_dir=os.path.dirname(video_path),
             on_progress=lambda tag, msg: _push_event(video_id, {"type": "progress", "tag": tag, "msg": msg}),
         )
-        result = pipeline.analyze_video(video_path)
+        result = pipeline.analyze_video(video_path, video_id=video_id, video_type=video_type)
         print(f"[SSE] Pipeline done for {video_id}, modules: {len(result.get('module_tree',[]))}", flush=True)
         module_tree = result.get("module_tree", [])
         duration = result.get("signal_data", {}).get("total_duration", 0.0)
@@ -83,7 +83,10 @@ def _run_analysis_streaming(video_id: str, video_path: str) -> None:
         _push_event(video_id, {"type": "done", "total": len(module_tree), "elapsed": elapsed})
 
     except Exception as e:
-        _jobs[video_id] = {"status": "failed", "error": str(e)}
+        # Preserve checkpoint on failure so pipeline can resume
+        existing = _jobs.get(video_id, {})
+        existing.update({"status": "failed", "error": str(e)})
+        _jobs[video_id] = existing
         _push_event(video_id, {"type": "error", "message": str(e)})
     finally:
         # Keep queue alive briefly so the final event can be read, then clean up
@@ -94,14 +97,14 @@ def _run_analysis_streaming(video_id: str, video_path: str) -> None:
 
 @router.post("/{video_id}", response_model=AnalysisResponse)
 async def analyze_video(
-    video_id: str, background_tasks: BackgroundTasks
+    video_id: str, background_tasks: BackgroundTasks, video_type: str = "vlog"
 ) -> AnalysisResponse:
     existing = _jobs.get(video_id)
     if existing and existing.get("status") == "processing":
         raise HTTPException(status_code=409, detail="Analysis already in progress")
 
     video_path = _find_video(video_id)
-    _jobs[video_id] = {"status": "processing"}
+    _jobs[video_id] = {"status": "processing", "pipeline_checkpoint": {"completed_stages": [], "last_updated": 0.0}}
 
     # Create thread-safe queue for SSE events
     _streams[video_id] = queue.Queue()
@@ -109,7 +112,7 @@ async def analyze_video(
     # Run analysis in separate thread so it doesn't block the event loop
     import concurrent.futures
     _executor = concurrent.futures.ThreadPoolExecutor(max_workers=1)
-    _executor.submit(_run_analysis_streaming, video_id, video_path)
+    _executor.submit(_run_analysis_streaming, video_id, video_path, video_type)
 
     return AnalysisResponse(video_id=video_id, status="processing")
 

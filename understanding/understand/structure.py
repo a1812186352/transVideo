@@ -1,7 +1,10 @@
 """Narrative structure inference — 5-type sliding-window classifier.
 
-Classifies video timeline into: opening / highlight / transition / effect / closing.
-Uses position heuristics, scene boundaries, energy curve, speech, and OCR signals.
+Classifies video timeline into: opening / highlight / transition / effect / closing
+with 19 fine-grained sub-types.  Supports 16 video-type presets that tune thresholds
+per domain (commercial, gaming, lecture, …).
+
+Uses position heuristics, scene boundaries, energy curve, speech, OCR, and visual signals.
 """
 
 from typing import List, Dict, Any, Tuple, Optional
@@ -88,6 +91,7 @@ class StructureInferrer:
         ocr_data: List[dict],
         visual_features: Optional[List[dict]] = None,
         confidence_threshold: float = 0.5,
+        preset: Optional[Tuple] = None,
     ) -> List[dict]:
         """Run 5-type sliding-window classification.
 
@@ -96,10 +100,12 @@ class StructureInferrer:
             audio_data: Audio analyzer output (bpm, energy, silence, speech).
             ocr_data: OCR results per frame.
             confidence_threshold: Minimum confidence to emit a segment.
+            preset: Optional (opening_pct, closing_pct, energy_mult, cut_mult,
+                    ocr_w, audio_w, yolo_w) tuple from VIDEO_TYPE_PRESETS.
 
         Returns:
             List of dicts with: start_time, end_time, structure_type,
-            confidence, evidence.
+            sub_type, confidence, evidence.
         """
         total_duration = self._resolve_duration(audio_data, ocr_data)
         if total_duration <= 0:
@@ -107,6 +113,18 @@ class StructureInferrer:
 
         if self.WINDOW_SIZE >= total_duration:
             return []
+
+        # ── Apply preset (override default thresholds) ──
+        if preset is not None:
+            opening_pct, closing_pct, energy_mult, cut_mult, ocr_w, audio_w, yolo_w = preset
+        else:
+            opening_pct = self.OPENING_POSITION
+            closing_pct = self.CLOSING_POSITION
+            energy_mult = 1.0
+            cut_mult = 1.0
+            ocr_w = 1.0
+            audio_w = 1.0
+            yolo_w = 1.0
 
         # ── Pre-compute per-window signals ──
         windows = self._build_windows(total_duration)
@@ -119,9 +137,9 @@ class StructureInferrer:
         for w_start, w_end in windows:
             w_dur = w_end - w_start
 
-            # ── Position check ──
-            is_opening_zone = w_start < total_duration * self.OPENING_POSITION
-            is_closing_zone = w_start > total_duration * self.CLOSING_POSITION
+            # ── Position check (preset-adjusted) ──
+            is_opening_zone = w_start < total_duration * opening_pct
+            is_closing_zone = w_start > total_duration * (1.0 - closing_pct)
 
             # ── Activity signals ──
             cuts = self._cuts_in_window(scene_bounds, w_start, w_end)
@@ -171,17 +189,17 @@ class StructureInferrer:
             # Highlight — any zone with high energy + emotion keywords
             hl_conf = 0.0
             hl_ev: List[str] = []
-            if energy_ratio > self.ENERGY_PEAK_RATIO:
+            if energy_ratio > self.ENERGY_PEAK_RATIO * energy_mult:
                 hl_conf += 0.35
                 hl_ev.append(f"energy_peak_{energy_ratio:.1f}x")
-            if cut_rate > self.HIGH_CUT_RATE:
+            if cut_rate > self.HIGH_CUT_RATE * cut_mult:
                 hl_conf += 0.20
                 hl_ev.append(f"cut_rate_{cut_rate:.1f}/s")
             if has_highlight_ocr:
-                hl_conf += 0.20
+                hl_conf += 0.20 * ocr_w
                 hl_ev.append("highlight_ocr_match")
             if speech_sec / max(w_dur, 0.1) > 0.7:
-                hl_conf += 0.10
+                hl_conf += 0.10 * audio_w
                 hl_ev.append("high_speech_density")
 
             if vw.get("avg_flow", 0) > self.FLOW_HIGH_THRESHOLD:
@@ -195,13 +213,13 @@ class StructureInferrer:
                 hl_ev.append("visual_face_highlight")
             # YOLO: crowd / vehicle / animal in highlight zone → activity
             if vw.get("yolo_person_count", 0) >= 3:
-                hl_conf += 0.08
+                hl_conf += 0.08 * yolo_w
                 hl_ev.append("yolo_crowd_activity")
             if vw.get("yolo_vehicle_count", 0) >= 1:
-                hl_conf += 0.05
+                hl_conf += 0.05 * yolo_w
                 hl_ev.append("yolo_vehicle_action")
             if vw.get("yolo_animal_count", 0) >= 1:
-                hl_conf += 0.03
+                hl_conf += 0.03 * yolo_w
                 hl_ev.append("yolo_animal_presence")
 
             if hl_conf > 0.3:
@@ -494,75 +512,91 @@ class StructureInferrer:
 
     @staticmethod
     def _derive_sub_type(structure_type: str, evidence: list) -> str:
-        """Map evidence signals to a domain-specific Chinese sub-label."""
+        """Map evidence signals to a fine-grained Chinese sub-label (19 types)."""
         ev_set = set(evidence)
+        has_ocr = any("ocr_match" in e for e in ev_set)
+        has_motion = any("visual_high_motion" in e or e.startswith("cut_rate_") for e in ev_set)
+        has_energy = any(e.startswith("energy_peak_") for e in ev_set)
+        has_face = any(
+            "face" in e or "talking_head" in e or "visual_face" in e
+            for e in ev_set
+        )
+        has_yolo = any(e.startswith("yolo_") for e in ev_set)
+        has_flow_low = any("avg_flow" in e for e in ev_set)  # proxied
+        is_fading = "energy_fading" in ev_set
+        is_dark = "visual_dark_transition" in ev_set
+        has_fade_out = "visual_fade_out" in ev_set
+        has_color_shift = "visual_color_shift" in ev_set
+        has_silence = "silence_gap" in ev_set
+        has_speech = "high_speech_density" in ev_set
+        is_short = any(e.startswith("short_segment_") for e in ev_set)
+        has_still = has_flow_low and not has_motion
 
         if structure_type == "opening":
-            if "opening_ocr_match" in ev_set:
-                if any(e in ev_set for e in ("visual_talking_head", "visual_face_highlight")):
-                    return "人物介绍"
-                return "标题展示"
-            if "yolo_crowd_intro" in ev_set:
-                return "群像引入"
-            if "visual_complex_scene" in ev_set:
-                return "场景建置"
-            if "visual_talking_head" in ev_set:
-                return "开场对话"
-            return "片头引入"
+            if has_ocr and not has_face and not has_motion:
+                return "标题卡"
+            if has_ocr and has_face:
+                return "人物引入"
+            if has_yolo and has_face:
+                return "人物引入"
+            if has_motion and has_energy:
+                return "悬念开场"
+            if has_face and has_speech:
+                return "人物引入"
+            if has_ocr:
+                return "品牌开场"
+            return "环境铺垫"
 
         if structure_type == "highlight":
-            has_motion = any("visual_high_motion" in e or e.startswith("cut_rate_") for e in ev_set)
-            has_energy = any(e.startswith("energy_peak_") for e in ev_set)
-            if "yolo_vehicle_action" in ev_set and has_motion:
-                return "追逐/竞速"
-            if "yolo_crowd_activity" in ev_set and has_motion:
-                return "群像混战"
-            if "yolo_animal_presence" in ev_set:
-                return "动物特写"
-            if has_motion and has_energy and "visual_vivid_motion" in ev_set:
+            if has_motion and has_energy and has_yolo:
                 return "动作高燃"
-            if "highlight_ocr_match" in ev_set and "visual_high_motion" in ev_set:
-                return "名场面"
-            if "visual_face_highlight" in ev_set:
-                return "人物高光"
-            if "high_speech_density" in ev_set:
-                return "对话高潮"
-            if has_energy and has_motion:
-                return "激烈冲突"
-            if has_energy:
-                return "情绪爆发"
-            return "精彩片段"
+            if has_speech and not has_motion:
+                return "台词金句"
+            if has_energy and not has_motion:
+                return "情绪峰值"
+            if has_motion and has_energy:
+                return "动作高燃"
+            if has_ocr and has_energy:
+                return "视觉爆发"
+            if has_motion:
+                return "动作高燃"
+            return "视觉爆发"
 
         if structure_type == "transition":
-            if "silence_gap" in ev_set and "visual_dark_transition" in ev_set:
-                return "段落切换"
-            if "transition_ocr" in ev_set:
-                return "时间跳转"
-            if "visual_color_shift" in ev_set and "visual_dark_transition" in ev_set:
-                return "场景切换"
-            if "visual_color_shift" in ev_set:
-                return "画面切换"
-            return "场景转换"
+            if has_silence and is_dark:
+                return "硬切"
+            if has_color_shift and not is_dark:
+                return "匹配剪辑"
+            if has_motion and has_color_shift:
+                return "滑动转场"
+            if has_color_shift and is_dark:
+                return "淡入淡出"
+            if is_dark:
+                return "硬切"
+            return "硬切"
 
         if structure_type == "effect":
-            dur_ev = next((e for e in ev_set if e.startswith("short_segment_")), "")
-            if "visual_intense_motion" in ev_set and "visual_high_saturation" in ev_set:
+            if has_motion and has_energy and is_short:
                 return "视觉特效"
-            if "visual_intense_motion" in ev_set:
-                return "快节奏闪切"
-            return "短效插入"
+            if is_short:
+                return "闪切插入"
+            return "视觉特效"
 
         if structure_type == "closing":
-            if "visual_fade_out" in ev_set and "energy_fading" in ev_set:
-                return "淡出结尾"
-            if "closing_ocr_match" in ev_set:
-                if "visual_fade_out" in ev_set:
-                    return "片尾字幕"
-                return "片尾致谢"
-            if "energy_fading" in ev_set:
-                return "情绪回落"
-            if "visual_fade_out" in ev_set:
-                return "淡出结尾"
-            return "结尾收束"
+            if has_ocr and has_still:
+                return "品牌露出"
+            if is_fading and has_fade_out:
+                return "同步淡出"
+            if is_fading and not has_fade_out:
+                return "音乐淡出"
+            if has_still and not has_ocr:
+                return "画面定格"
+            if has_fade_out and not is_fading:
+                return "黑场淡出"
+            if has_ocr:
+                return "字幕滚动"
+            if is_fading:
+                return "音乐淡出"
+            return "同步淡出"
 
         return "未分类"

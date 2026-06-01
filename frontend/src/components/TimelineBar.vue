@@ -12,7 +12,7 @@
         @dragstart="onDragStart(i, $event)"
         @dragover.prevent="onDragOver(i, $event)"
         @dragend="onDragEnd"
-        @click="store.selectModule(mod.id)"
+        @click="onCardClick(mod)"
       >
         <span class="timeline__card-type">{{ typeLabel(mod.type) }}</span>
         <span class="timeline__card-dur">{{ fmtDuration(mod.duration) }}</span>
@@ -27,15 +27,29 @@
 </template>
 
 <script setup lang="ts">
-import { ref, computed } from 'vue';
+import { ref, computed, watch } from 'vue';
 import { useProjectStore } from '../stores/project';
-import type { ModuleType } from '../types/script';
+import type { Module, ModuleType } from '../types/script';
 
 const store = useProjectStore();
 
 // ── Drag reorder ──
 const scrollRef = ref<HTMLDivElement | null>(null);
 let dragIdx = -1;
+
+// ── Card click → select + seek ──
+function onCardClick(mod: Module) {
+  store.selectModule(mod.id);
+  store.seekTo(mod.start_time);
+}
+
+// ── Watch currentTime → drive video playback ──
+watch(() => store.currentTime, (t) => {
+  const video = document.querySelector('.preview__video') as HTMLVideoElement | null;
+  if (video && Math.abs(video.currentTime - t) > 0.5) {
+    video.currentTime = t;
+  }
+});
 
 function onDragStart(i: number, e: DragEvent) {
   dragIdx = i;

@@ -149,11 +149,13 @@ const statusDotClass = computed(() => {
 interface HistoryItem { name: string; size: string; url?: string; }
 const history = ref<HistoryItem[]>([]);
 
+const MAX_POLL_ATTEMPTS = 600; // matches workbench handleExport loop
+
 // ── Export: delegate to workbench store ──
 function doExport() {
   ws.handleExport();
-  // Track progress via polling (handled in store, but we animate locally)
   exportProgress.value = 0;
+  let pollCount = 0;
   const iv = setInterval(() => {
     if (store.exportStatus === 'completed' || store.exportStatus === 'failed') {
       exportProgress.value = store.exportStatus === 'completed' ? 100 : 0;
@@ -164,7 +166,8 @@ function doExport() {
       }
       clearInterval(iv);
     } else {
-      exportProgress.value = Math.min(95, exportProgress.value + Math.random() * 8);
+      pollCount++;
+      exportProgress.value = Math.min(95, Math.round(pollCount / MAX_POLL_ATTEMPTS * 95));
     }
   }, 2000);
 }
