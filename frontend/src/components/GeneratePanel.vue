@@ -396,15 +396,15 @@ function deleteItem(item: HistoryItem) {
 .gen-monitor__body {
   max-height: 100px;
   overflow-y: auto;
-  background: #0d1117;
-  border: 1px solid #21262d;
+  background: var(--bg-surface);
+  border: 1px solid var(--border);
   border-radius: var(--radius-sm);
   padding: 4px 6px;
   font-family: var(--font-mono);
   font-size: 10px;
   line-height: 1.5;
   scrollbar-width: thin;
-  scrollbar-color: #21262d transparent;
+  scrollbar-color: var(--border) transparent;
 }
 .gen-monitor__line {
   display: flex;
@@ -412,24 +412,25 @@ function deleteItem(item: HistoryItem) {
   white-space: nowrap;
 }
 .gen-monitor__ts {
-  color: #7ee787;
+  color: var(--accent);
   flex-shrink: 0;
 }
 .gen-monitor__tag {
-  color: #8b949e;
+  color: var(--text-muted);
   flex-shrink: 0;
 }
 .gen-monitor__msg {
-  color: #c9d1d9;
+  color: var(--text-secondary);
   overflow: hidden;
   text-overflow: ellipsis;
 }
 .gen-monitor__msg b {
-  color: #a371f7;
+  color: var(--accent);
   font-weight: 600;
 }
 .gen-monitor__empty {
-  color: #484f58;
+  color: var(--text-muted);
+  opacity: 0.6;
   padding: 8px;
   text-align: center;
   font-size: 10px;
