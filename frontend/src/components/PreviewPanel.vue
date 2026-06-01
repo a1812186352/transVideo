@@ -11,10 +11,8 @@
         @dragleave="dragOver = false"
         @drop.prevent="onDrop"
       >
-        <svg width="48" height="48" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1" stroke-linecap="round" opacity="0.3">
-          <polygon points="5 3 19 12 5 21 5 3" />
-        </svg>
-        <span>拖入视频或点击上传按钮</span>
+        <div class="preview__play-icon"></div>
+        <span>拖入视频开始分析</span>
       </div>
 
       <!-- Video player -->
@@ -173,10 +171,10 @@ function onDrop(e: DragEvent) {
   display: flex;
   align-items: center;
   justify-content: center;
-  background: var(--bg-surface);
+  background: var(--bg-root);
   position: relative;
   overflow: hidden;
-  padding: 16px;
+  padding: 16px 24px;
 }
 
 /* ── Dropzone ── */
@@ -184,33 +182,52 @@ function onDrop(e: DragEvent) {
   display: flex;
   flex-direction: column;
   align-items: center;
-  gap: 12px;
-  width: 80%;
-  max-width: 400px;
+  justify-content: center;
+  gap: 8px;
+  width: 100%;
+  max-width: 720px;
   aspect-ratio: 16/9;
-  border: 2px dashed var(--border);
+  background: var(--bg-surface);
+  border: 1px solid var(--border);
   border-radius: var(--radius-md);
+  box-shadow: var(--shadow-sm);
   color: var(--text-muted);
-  font-size: 13px;
+  font-size: 12px;
   cursor: pointer;
   transition: all var(--transition);
-  justify-content: center;
 }
 .preview__dropzone:hover {
   border-color: var(--accent);
   color: var(--accent);
-  background: var(--accent-subtle);
+}
+.preview__dropzone:hover .preview__play-icon {
+  border-color: var(--accent);
+}
+.preview__play-icon {
+  width: 40px; height: 40px; border-radius: 50%;
+  border: 2px solid var(--border);
+  display: flex; align-items: center; justify-content: center;
+  transition: border-color var(--transition);
+}
+.preview__play-icon::after {
+  content: ''; display: block;
+  width: 0; height: 0;
+  border-left: 10px solid var(--accent);
+  border-top: 6px solid transparent;
+  border-bottom: 6px solid transparent;
+  margin-left: 3px;
 }
 
 /* ── Video player ── */
 .preview__player {
   position: relative;
   width: 100%;
-  max-width: 100%;
+  max-width: 720px;
   aspect-ratio: 16/9;
-  background: #000;
+  background: var(--bg-surface);
   border: 1px solid var(--border);
-  border-radius: var(--radius-sm);
+  border-radius: var(--radius-md);
+  box-shadow: var(--shadow-sm);
   overflow: hidden;
 }
 .preview__video {
@@ -249,13 +266,8 @@ function onDrop(e: DragEvent) {
 
 /* ── Thumbnail strip ── */
 .preview__strip {
-  flex-shrink: 0;
-  border-top: 1px solid var(--border);
-  background: var(--bg-panel);
-  padding: 6px 8px;
-  overflow-x: auto;
-  scrollbar-width: thin;
-  scrollbar-color: var(--border) transparent;
+  width: 100%; max-width: 720px; margin: 10px auto 0;
+  display: flex; gap: 4px; overflow-x: auto; padding: 6px 0;
 }
 .preview__strip-inner {
   display: flex;
@@ -263,22 +275,16 @@ function onDrop(e: DragEvent) {
   min-width: max-content;
 }
 .preview__thumb {
-  flex-shrink: 0;
-  width: 120px;
-  height: 68px;
+  width: 100px; height: 56px; flex-shrink: 0;
+  background: var(--bg-surface);
+  border: 1px solid var(--border);
   border-radius: var(--radius-sm);
   overflow: hidden;
   cursor: pointer;
-  border: 2px solid transparent;
-  transition: border-color var(--transition);
-  background: var(--bg-surface);
+  transition: all var(--transition);
 }
-.preview__thumb:hover {
-  border-color: var(--text-muted);
-}
-.preview__thumb--active {
-  border-color: var(--accent);
-}
+.preview__thumb:hover { border-color: var(--accent); }
+.preview__thumb--active { border-color: var(--accent); background: var(--accent-subtle); }
 .preview__thumb img {
   width: 100%;
   height: 100%;

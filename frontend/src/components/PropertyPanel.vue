@@ -4,61 +4,58 @@
 
     <div class="prop__body" v-if="selectedModule">
       <!-- ═══ Scene Tags ═══ -->
-      <details class="prop-group" open>
-        <summary class="prop-group__head">场景标签 <span class="prop-group__arrow">▼</span></summary>
-        <div class="prop-group__body">
+      <div class="prop-group">
+        <div class="prop-group__head" @click="toggleGroup('scene')">场景标签 <span class="prop-group__arrow" :class="{ open: groups.scene }">▼</span></div>
+        <div class="prop-group__body" v-show="groups.scene">
           <div v-if="sceneTags.length" class="prop-tags">
             <span v-for="tag in sceneTags" :key="tag" class="prop-tag">{{ tag }}</span>
           </div>
           <span v-else class="prop-empty">—</span>
         </div>
-      </details>
+      </div>
 
       <!-- ═══ Visual Elements ═══ -->
-      <details class="prop-group" open>
-        <summary class="prop-group__head">视觉元素 <span class="prop-group__arrow">▼</span></summary>
-        <div class="prop-group__body">
-          <div class="prop-row"><span class="prop-dot" /> 构图: {{ detail?.composition || '—' }}</div>
-          <div class="prop-row"><span class="prop-dot" /> 内容: {{ detail?.visual_elements?.join('、') || '—' }}</div>
-          <div class="prop-row"><span class="prop-dot" /> 动效: {{ detail?.motion || '—' }}</div>
+      <div class="prop-group">
+        <div class="prop-group__head" @click="toggleGroup('visual')">视觉元素 <span class="prop-group__arrow" :class="{ open: groups.visual }">▼</span></div>
+        <div class="prop-group__body" v-show="groups.visual">
+          <div class="prop-row"><span class="prop-dot comp" /> 构图: {{ detail?.composition || '—' }}</div>
+          <div class="prop-row"><span class="prop-dot cont" /> 内容: {{ detail?.visual_elements?.join('、') || '—' }}</div>
+          <div class="prop-row"><span class="prop-dot motion" /> 动效: {{ detail?.motion || '—' }}</div>
         </div>
-      </details>
+      </div>
 
       <!-- ═══ Color Tone ═══ -->
-      <details class="prop-group" open>
-        <summary class="prop-group__head">色彩基调 <span class="prop-group__arrow">▼</span></summary>
-        <div class="prop-group__body">
+      <div class="prop-group">
+        <div class="prop-group__head" @click="toggleGroup('color')">色彩基调 <span class="prop-group__arrow" :class="{ open: groups.color }">▼</span></div>
+        <div class="prop-group__body" v-show="groups.color">
           <div class="prop-swatches" v-if="detail?.color_palette?.length">
-            <span v-for="(c, i) in detail.color_palette" :key="i" class="prop-swatch" :style="{ background: c }" :title="c" />
+            <span v-for="(c, i) in detail.color_palette" :key="i" class="prop-swatch" :style="{ background: c }" />
           </div>
           <div class="prop-row" style="margin-top: 4px;">{{ detail?.color_tone || '—' }}</div>
         </div>
-      </details>
+      </div>
 
       <!-- ═══ Audio Analysis ═══ -->
-      <details class="prop-group" open>
-        <summary class="prop-group__head">音频解析 <span class="prop-group__arrow">▼</span></summary>
-        <div class="prop-group__body">
-          <div class="prop-row-audio">
-            <span class="prop-audio-label">BPM: {{ detail?.bpm || '—' }}</span>
-            <div class="prop-energy">
-              <span v-for="(v, i) in energyBars" :key="i" class="prop-bar" :style="{ height: v + '%' }" />
-            </div>
+      <div class="prop-group">
+        <div class="prop-group__head" @click="toggleGroup('audio')">音频分析 <span class="prop-group__arrow" :class="{ open: groups.audio }">▼</span></div>
+        <div class="prop-group__body" v-show="groups.audio">
+          <div class="prop-row">BPM: {{ detail?.bpm || '—' }} · 类型: {{ detail?.bgm_type || '—' }}</div>
+          <div class="prop-waveform">
+            <span v-for="(v, i) in energyBars" :key="i" class="prop-bar" :style="{ height: v + '%' }" />
           </div>
-          <div class="prop-row">类型: {{ detail?.bgm_type || '—' }}</div>
         </div>
-      </details>
+      </div>
 
       <!-- ═══ Text Analysis ═══ -->
-      <details class="prop-group" open>
-        <summary class="prop-group__head">文字解析 <span class="prop-group__arrow">▼</span></summary>
-        <div class="prop-group__body">
+      <div class="prop-group">
+        <div class="prop-group__head" @click="toggleGroup('text')">文字解析 <span class="prop-group__arrow" :class="{ open: groups.text }">▼</span></div>
+        <div class="prop-group__body" v-show="groups.text">
           <div v-if="ocrTexts.length" class="prop-ocr">
             <div v-for="(t, i) in ocrTexts" :key="i" class="prop-ocr__line">{{ t }}</div>
           </div>
           <span v-else class="prop-empty">—</span>
         </div>
-      </details>
+      </div>
     </div>
 
     <!-- No selection -->
@@ -69,10 +66,17 @@
 </template>
 
 <script setup lang="ts">
-import { computed } from 'vue';
+import { computed, reactive } from 'vue';
 import { useProjectStore } from '../stores/project';
 
 const store = useProjectStore();
+
+const groups = reactive({
+  scene: true, visual: true, color: true, audio: true, text: true,
+});
+function toggleGroup(key: keyof typeof groups) {
+  groups[key] = !groups[key];
+}
 
 const selectedModule = computed(() => store.selectedModule);
 const detail = computed(() => (selectedModule.value as any)?.detail || null);
@@ -117,6 +121,8 @@ const energyBars = computed(() => {
   font-size: 12px;
   font-weight: 600;
   color: var(--text-secondary);
+  text-transform: uppercase;
+  letter-spacing: 0.4px;
   border-bottom: 1px solid var(--border);
   flex-shrink: 0;
 }
@@ -142,27 +148,21 @@ const energyBars = computed(() => {
 
 /* ── Collapsible group ── */
 .prop-group {
-  border: 1px solid var(--border);
+  margin-bottom: 2px;
+  border: 1px solid transparent;
   border-radius: var(--radius-sm);
-  margin-bottom: 6px;
-  overflow: hidden;
-  transition: height 200ms ease;
 }
 .prop-group__head {
   display: flex;
   align-items: center;
   justify-content: space-between;
-  padding: 7px 10px;
+  padding: 6px 8px;
   font-size: 11px;
   font-weight: 600;
   color: var(--text-secondary);
   cursor: pointer;
-  user-select: none;
-  background: var(--bg-surface);
-  list-style: none;
-}
-.prop-group__head::-webkit-details-marker {
-  display: none;
+  border-radius: var(--radius-sm);
+  transition: background var(--transition);
 }
 .prop-group__head:hover {
   background: var(--bg-hover);
@@ -172,84 +172,45 @@ const energyBars = computed(() => {
   color: var(--text-muted);
   transition: transform 200ms ease;
 }
-details[open] .prop-group__arrow {
+.prop-group__arrow.open {
   transform: rotate(180deg);
 }
 .prop-group__body {
-  padding: 6px 10px 8px;
+  padding: 0 8px 8px;
 }
 
-/* ── Tag row ── */
-.prop-tags {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 4px;
-}
+/* ── Tags ── */
+.prop-tags { display: flex; flex-wrap: wrap; gap: 4px; }
 .prop-tag {
-  display: inline-block;
-  padding: 2px 6px;
-  font-size: 10px;
-  border-radius: 3px;
-  background: var(--accent-subtle);
-  color: var(--accent);
+  padding: 2px 8px; font-size: 11px;
+  background: var(--accent-subtle); color: var(--accent);
+  border-radius: 10px; font-weight: 500;
 }
 
 /* ── Row ── */
 .prop-row {
-  font-size: 11px;
-  line-height: 1.6;
-  color: var(--text-secondary);
-  display: flex;
-  align-items: center;
-  gap: 4px;
+  font-size: 12px; padding: 2px 0; color: var(--text-secondary);
+  display: flex; align-items: center; gap: 6px;
 }
 .prop-dot {
-  display: inline-block;
-  width: 4px;
-  height: 4px;
-  border-radius: 50%;
-  background: var(--text-muted);
-  flex-shrink: 0;
+  width: 5px; height: 5px; border-radius: 50%; flex-shrink: 0;
 }
+.prop-dot.comp   { background: #00a8e8; }
+.prop-dot.cont   { background: #f59e0b; }
+.prop-dot.motion { background: #10b981; }
 
 /* ── Color swatches ── */
-.prop-swatches {
-  display: flex;
-  gap: 4px;
-}
-.prop-swatch {
-  width: 20px;
-  height: 20px;
-  border-radius: 3px;
-  border: 1px solid var(--border);
-}
+.prop-swatches { display: flex; gap: 2px; margin-top: 4px; }
+.prop-swatch { height: 8px; flex: 1; border-radius: 2px; }
 
-/* ── Audio row ── */
-.prop-row-audio {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  margin-bottom: 2px;
-}
-.prop-audio-label {
-  font-size: 11px;
-  color: var(--text-secondary);
-  flex-shrink: 0;
-}
-.prop-energy {
-  display: flex;
-  align-items: flex-end;
-  gap: 2px;
-  height: 24px;
-  flex: 1;
+/* ── Waveform ── */
+.prop-waveform {
+  display: flex; align-items: flex-end; gap: 1px;
+  height: 28px; margin-top: 4px;
 }
 .prop-bar {
-  flex: 1;
-  background: var(--accent);
-  border-radius: 1px;
-  min-height: 2px;
-  opacity: 0.6;
-  transition: height 200ms ease;
+  width: 6px; border-radius: 2px 2px 0 0;
+  background: var(--accent); opacity: 0.7;
 }
 
 /* ── OCR ── */

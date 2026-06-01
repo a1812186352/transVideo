@@ -1,7 +1,10 @@
 <template>
   <header class="topbar">
     <!-- Left: Logo -->
-    <div class="topbar__logo">transVideo</div>
+    <div class="topbar__logo">
+      <span class="topbar__dot"></span>
+      transVideo
+    </div>
 
     <!-- Center: Upload button + hidden input -->
     <div class="topbar__center">
@@ -18,9 +21,10 @@
 
     <!-- Right: Actions -->
     <div class="topbar__actions">
-      <button class="topbar__btn topbar__btn--theme" @click="toggleTheme" :title="isDark ? '切换浅色' : '切换深色'">
-        {{ isDark ? '☀' : '🌙' }}
-      </button>
+      <div class="topbar__theme">
+        <button class="topbar__theme-btn" :class="{ active: !isDark }" @click="setTheme('light')">浅色</button>
+        <button class="topbar__theme-btn" :class="{ active: isDark }" @click="setTheme('dark')">深色</button>
+      </div>
       <button class="topbar__btn topbar__btn--gear" @click="openSettings" title="设置">⚙</button>
     </div>
   </header>
@@ -54,9 +58,11 @@ function onFileSelected(e: Event) {
   }
 }
 
-function toggleTheme() {
-  (globalThis as any).__toggleTheme?.();
-  isDark.value = document.documentElement.getAttribute('data-theme') !== 'light';
+function setTheme(theme: string) {
+  document.documentElement.setAttribute('data-theme', theme);
+  localStorage.setItem('theme', theme);
+  (globalThis as any).__theme = theme;
+  isDark.value = theme === 'dark';
 }
 
 function openSettings() {
@@ -78,11 +84,22 @@ function openSettings() {
 
 /* ── Logo ── */
 .topbar__logo {
-  font-size: 16px;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 15px;
   font-weight: 700;
   color: var(--accent);
   letter-spacing: -0.3px;
   user-select: none;
+  flex-shrink: 0;
+  min-width: 140px;
+}
+.topbar__dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: var(--accent);
   flex-shrink: 0;
 }
 
@@ -91,6 +108,7 @@ function openSettings() {
   flex: 1;
   display: flex;
   align-items: center;
+  justify-content: center;
 }
 
 /* ── Upload button ── */
@@ -98,7 +116,7 @@ function openSettings() {
   display: inline-flex;
   align-items: center;
   gap: 6px;
-  padding: 6px 14px;
+  padding: 6px 20px;
   border: none;
   border-radius: var(--radius-sm);
   background: var(--accent);
@@ -106,46 +124,71 @@ function openSettings() {
   font-size: 13px;
   font-weight: 500;
   cursor: pointer;
-  transition: background var(--transition), opacity var(--transition);
+  transition: background var(--transition);
 }
 .topbar__upload:hover {
   background: var(--accent-hover);
 }
-.topbar__upload:active {
-  opacity: 0.85;
-}
-.topbar__upload svg {
-  flex-shrink: 0;
-}
+.topbar__upload svg { flex-shrink: 0; }
 
 /* ── Actions ── */
 .topbar__actions {
   display: flex;
   align-items: center;
-  gap: 4px;
+  gap: 12px;
   flex-shrink: 0;
+  min-width: 140px;
+  justify-content: flex-end;
 }
 
+/* ── Segmented theme toggle ── */
+.topbar__theme {
+  display: flex;
+  align-items: center;
+  gap: 2px;
+  background: var(--bg-surface);
+  border-radius: var(--radius-sm);
+  padding: 2px;
+  border: 1px solid var(--border);
+}
+.topbar__theme-btn {
+  border: none;
+  background: transparent;
+  padding: 4px 8px;
+  font-size: 12px;
+  cursor: pointer;
+  border-radius: 3px;
+  color: var(--text-muted);
+  transition: all var(--transition);
+}
+.topbar__theme-btn.active {
+  background: var(--bg-panel);
+  color: var(--text-primary);
+  box-shadow: var(--shadow-sm);
+}
+.topbar__theme-btn:hover:not(.active) {
+  color: var(--text-secondary);
+}
+
+/* ── Settings gear ── */
 .topbar__btn {
   display: flex;
   align-items: center;
   justify-content: center;
-  width: 32px;
-  height: 32px;
+  width: 28px;
+  height: 28px;
   border: none;
   border-radius: var(--radius-sm);
   background: transparent;
-  color: var(--text-secondary);
-  font-size: 16px;
+  color: var(--text-muted);
+  font-size: 14px;
   cursor: pointer;
-  transition: background var(--transition), transform 0.3s ease;
+  transition: all var(--transition);
 }
 .topbar__btn:hover {
   background: var(--bg-hover);
-  color: var(--text-primary);
+  color: var(--text-secondary);
 }
-
-/* ── Gear rotate on hover ── */
 .topbar__btn--gear:hover {
   transform: rotate(90deg);
 }

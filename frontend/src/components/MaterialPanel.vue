@@ -190,19 +190,19 @@ function onDragStart(id: string, e: DragEvent) {
 .mat-tabs {
   display: flex;
   border-bottom: 1px solid var(--border);
+  padding: 0 12px;
   flex-shrink: 0;
 }
 .mat-tab {
-  flex: 1;
-  padding: 8px 4px;
+  padding: 7px 14px;
+  font-size: 12px;
+  font-weight: 500;
+  color: var(--text-muted);
+  cursor: pointer;
   border: none;
   background: transparent;
-  color: var(--text-muted);
-  font-size: 11px;
-  font-weight: 500;
-  cursor: pointer;
-  transition: color var(--transition), box-shadow var(--transition);
   border-bottom: 2px solid transparent;
+  transition: all var(--transition);
 }
 .mat-tab--active {
   color: var(--accent);

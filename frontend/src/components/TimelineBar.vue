@@ -1,5 +1,6 @@
 <template>
   <div class="timeline">
+    <div class="timeline__header">时间轴 · 模块编排</div>
     <div class="timeline__modules" ref="scrollRef">
       <div
         v-for="(mod, i) in store.modules"
@@ -85,81 +86,61 @@ const progressPct = computed(() => {
   display: flex;
   flex-direction: column;
   height: 100%;
-  padding: 4px 8px;
-  gap: 4px;
+  padding: 0;
+}
+.timeline__header {
+  display: flex; align-items: center;
+  padding: 4px 12px;
+  font-size: 10px; font-weight: 600;
+  color: var(--text-muted);
+  text-transform: uppercase; letter-spacing: 0.3px;
+  border-bottom: 1px solid var(--border); flex-shrink: 0;
 }
 
 /* ── Module cards row ── */
 .timeline__modules {
-  display: flex;
-  gap: 4px;
-  overflow-x: auto;
-  flex: 1;
-  align-items: stretch;
-  scrollbar-width: thin;
-  scrollbar-color: var(--border) transparent;
-  padding: 2px 0;
+  flex: 1; display: flex; align-items: center;
+  padding: 0 12px; gap: 6px; overflow-x: auto;
 }
 
 /* ── Module card ── */
 .timeline__card {
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  justify-content: center;
-  min-width: 48px;
-  padding: 4px 8px;
-  border-radius: var(--radius-md);
-  background: var(--bg-surface);
+  height: 40px; border-radius: var(--radius-sm);
   border: 1px solid var(--border);
-  border-left: 3px solid var(--border);
-  cursor: pointer;
-  user-select: none;
-  transition: all var(--transition);
-  box-shadow: var(--shadow-sm);
+  background: var(--bg-surface);
+  display: flex; align-items: center; justify-content: center;
+  font-size: 11px; font-weight: 500;
+  color: var(--text-secondary);
+  cursor: pointer; transition: all var(--transition);
+  flex-shrink: 0; min-width: 60px; padding: 0 12px;
 }
-.timeline__card:hover {
-  background: var(--bg-hover);
-}
-.timeline__card--sel {
-  border-color: var(--accent);
-  box-shadow: var(--shadow-md);
-}
+.timeline__card:hover { background: var(--bg-hover); box-shadow: var(--shadow-sm); }
+.timeline__card--sel { border-color: var(--accent); }
 
 /* Type color accents on left border */
-.timeline__card--transition { border-left-color: #58a6ff; }
-.timeline__card--effect     { border-left-color: #bc8cff; }
-.timeline__card--video_segment { border-left-color: #f0b429; }
-.timeline__card--title,
-.timeline__card--subtitle,
-.timeline__card--audio    { border-left-color: var(--text-muted); }
+.timeline__card--title       { border-left: 3px solid #9ca3af; }
+.timeline__card--subtitle    { border-left: 3px solid #9ca3af; }
+.timeline__card--audio       { border-left: 3px solid #9ca3af; }
+.timeline__card--transition  { border-left: 3px solid #3b82f6; }
+.timeline__card--effect      { border-left: 3px solid #8b5cf6; }
+.timeline__card--video_segment { border-left: 3px solid #ef4444; }
 
 /* ── Card content ── */
 .timeline__card-type {
-  font-size: 10px;
-  font-weight: 600;
-  color: var(--text-secondary);
-  white-space: nowrap;
+  font-size: 11px; font-weight: 500;
+  color: var(--text-secondary); white-space: nowrap;
 }
 .timeline__card-dur {
-  font-size: 9px;
-  color: var(--text-muted);
-  font-family: var(--font-mono);
-  white-space: nowrap;
+  font-size: 10px; color: var(--text-muted);
+  margin-left: 4px;
 }
 
 /* ── Progress bar ── */
-.timeline__progress {
-  height: 4px;
-  background: var(--border);
-  border-radius: 2px;
-  overflow: hidden;
-  flex-shrink: 0;
-}
+.timeline__progress { height: 3px; background: var(--border); flex-shrink: 0; }
 .timeline__progress-fill {
-  height: 100%;
+  height: 100%; width: 35%;
   background: var(--accent);
-  border-radius: 2px;
+  border-radius: 0 2px 2px 0;
   transition: width 0.3s ease;
 }
 </style>

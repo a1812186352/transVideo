@@ -242,30 +242,23 @@ function deleteItem(item: HistoryItem) {
 /* ── Settings ── */
 .gen__settings {
   display: flex;
-  flex-direction: column;
-  gap: 6px;
+  gap: 8px;
+  margin-bottom: 10px;
 }
 .gen__field {
   display: flex;
   align-items: center;
-  justify-content: space-between;
+  gap: 4px;
 }
 .gen__field-label {
-  font-size: 11px;
+  font-size: 10px;
   color: var(--text-secondary);
-}
-.gen__select {
-  padding: 3px 6px;
-  border: 1px solid var(--border);
-  border-radius: var(--radius-sm);
-  background: var(--bg-surface);
-  color: var(--text-primary);
-  font-size: 11px;
-  outline: none;
   cursor: pointer;
 }
-.gen__select:focus {
-  border-color: var(--accent);
+.gen__field-label::after {
+  content: '▾';
+  font-size: 8px;
+  margin-left: 2px;
 }
 
 /* ── Generate button ── */
@@ -317,9 +310,8 @@ function deleteItem(item: HistoryItem) {
 
 /* ── History ── */
 .gen__history-title {
-  font-size: 11px;
-  font-weight: 600;
-  color: var(--text-secondary);
+  font-size: 10px; color: var(--text-muted);
+  text-transform: uppercase; letter-spacing: 0.3px;
   margin-bottom: 6px;
 }
 .gen__history-list {
@@ -329,16 +321,12 @@ function deleteItem(item: HistoryItem) {
   scrollbar-color: var(--border) transparent;
 }
 .gen__history-item {
-  display: flex;
-  align-items: center;
-  padding: 4px 6px;
-  border-radius: var(--radius-sm);
-  font-size: 10px;
-  transition: background var(--transition);
+  display: flex; align-items: center; justify-content: space-between;
+  padding: 5px 0; font-size: 11px; color: var(--text-secondary);
+  border-bottom: 1px solid var(--border);
+  cursor: pointer; transition: color var(--transition);
 }
-.gen__history-item:hover {
-  background: var(--bg-hover);
-}
+.gen__history-item:hover { color: var(--accent); }
 .gen__history-name {
   flex: 1;
   overflow: hidden;

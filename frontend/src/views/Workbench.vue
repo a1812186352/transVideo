@@ -177,6 +177,8 @@ function onTopBarUpload(file: File) {
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
+  text-transform: uppercase;
+  letter-spacing: 0.4px;
 }
 
 /* ── Collapse button ── */
