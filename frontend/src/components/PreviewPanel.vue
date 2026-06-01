@@ -25,15 +25,17 @@
         </span>
       </div>
 
-      <!-- Video player -->
-      <div v-else class="preview__player">
+      <!-- Video player: :key 强制 videoId 变更时重建 -->
+      <div v-if="videoId" class="preview__player">
         <video
+          :key="videoId"
           ref="videoRef"
           class="preview__video"
           :src="videoSrc"
           controls
-          preload="metadata"
+          preload="auto"
           @timeupdate="onTimeUpdate"
+          @loadedmetadata="onLoadedMeta"
         />
         <!-- Loading overlay (analysis in progress) -->
         <div v-if="analyzing" class="preview__overlay">
@@ -62,7 +64,7 @@
 </template>
 
 <script setup lang="ts">
-import { ref, computed, onMounted, watch } from 'vue';
+import { ref, computed, watch, nextTick } from 'vue';
 import { useProjectStore } from '../stores/project';
 import { useWorkbenchStore } from '../stores/workbench';
 
@@ -105,8 +107,10 @@ const fmtDuration = (s: number): string => {
 interface Thumb { time: number; src: string; }
 const thumbnails = ref<Thumb[]>([]);
 
-watch(videoId, (id) => {
+watch(videoId, async (id) => {
   if (!id) { thumbnails.value = []; return; }
+  // 等下一个 tick，确保 setMetadata 已完成
+  await nextTick();
   generateThumbnails(id);
 });
 
@@ -129,6 +133,16 @@ async function generateThumbnails(id: string) {
 // ── Video controls ──
 function onTimeUpdate() {
   if (videoRef.value) currentTime.value = videoRef.value.currentTime;
+}
+function onLoadedMeta() {
+  // 视频元数据加载完成后，同步实际分辨率到 store（若后端未返回）
+  const v = videoRef.value;
+  if (v && (!store.script.metadata.resolution.width || !store.script.metadata.resolution.height)) {
+    if (v.videoWidth && v.videoHeight) {
+      store.script.metadata.resolution.width = v.videoWidth;
+      store.script.metadata.resolution.height = v.videoHeight;
+    }
+  }
 }
 function seekTo(time: number) {
   if (videoRef.value) videoRef.value.currentTime = time;
@@ -160,6 +174,7 @@ function onDrop(e: DragEvent) {
 .preview__stage {
   flex: 1;
   display: flex;
+  flex-direction: column;
   align-items: center;
   justify-content: center;
   background: var(--bg-root);
@@ -197,7 +212,7 @@ function onDrop(e: DragEvent) {
 /* ── Info bar (above player) ── */
 .preview__info {
   width: 100%;
-  max-width: 720px;
+  max-width: 100%;
   display: flex;
   align-items: center;
   justify-content: space-between;
@@ -239,8 +254,9 @@ function onDrop(e: DragEvent) {
 .preview__player {
   position: relative;
   width: 100%;
-  max-width: 720px;
-  aspect-ratio: 16/9;
+  max-width: 100%;
+  flex: 1;
+  min-height: 0;
   background: var(--bg-surface);
   border: 1px solid var(--border);
   border-radius: var(--radius-md);
@@ -252,6 +268,7 @@ function onDrop(e: DragEvent) {
   height: 100%;
   object-fit: contain;
   display: block;
+  background: #000;
 }
 
 /* ── Loading overlay ── */
@@ -283,7 +300,7 @@ function onDrop(e: DragEvent) {
 
 /* ── Thumbnail strip ── */
 .preview__strip {
-  width: 100%; max-width: 720px; margin: 0 auto;
+  width: 100%; max-width: 100%;
   display: flex; gap: 4px; overflow-x: auto; padding: 6px 0;
   scrollbar-width: thin;
   scrollbar-color: var(--border) transparent;
