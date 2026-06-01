@@ -1,22 +1,39 @@
 <template>
   <div class="timeline">
     <div class="timeline__header">时间轴 · 模块编排</div>
-    <div class="timeline__modules" ref="scrollRef">
-      <div
-        v-for="(mod, i) in store.modules"
-        :key="mod.id"
-        class="timeline__card"
-        :class="[`timeline__card--${mod.type}`, { 'timeline__card--sel': store.selectedModuleId === mod.id }]"
-        :style="{ flex: mod.duration || 1 }"
-        draggable="true"
-        @dragstart="onDragStart(i, $event)"
-        @dragover.prevent="onDragOver(i, $event)"
-        @dragend="onDragEnd"
-        @click="onCardClick(mod)"
-      >
-        <span class="timeline__card-type">{{ typeLabel(mod.type) }}</span>
-        <span class="timeline__card-dur">{{ fmtDuration(mod.duration) }}</span>
-      </div>
+    <div class="timeline__track" ref="scrollRef">
+      <template v-for="(mod, i) in store.modules" :key="mod.id">
+        <!-- ═══ Trend marker between cards ═══ -->
+        <div v-if="i > 0" class="trend">
+          <span v-if="brightnessTrend(mod)" class="trend__icon" :title="'亮度: ' + brightnessTrend(mod)">
+            {{ brightnessTrend(mod) === '变亮' ? '☀' : '🌙' }}
+          </span>
+          <span v-if="scaleTrend(mod)" class="trend__icon" :title="'缩放: ' + scaleTrend(mod)">
+            {{ scaleTrend(mod) === '扩散' ? '↗' : '↙' }}
+          </span>
+          <span v-if="movementTrend(mod)" class="trend__bar" :class="movementTrend(mod) === '动效增强' ? 'trend__bar--up' : 'trend__bar--down'" />
+        </div>
+
+        <!-- ═══ Module card ═══ -->
+        <div
+          class="timeline__card"
+          :class="[`timeline__card--${mod.type}`, { 'timeline__card--sel': store.selectedModuleId === mod.id }]"
+          :style="{ flex: mod.duration || 1 }"
+          draggable="true"
+          @dragstart="onDragStart(i, $event)"
+          @dragover.prevent="onDragOver(i, $event)"
+          @dragend="onDragEnd"
+          @click="onCardClick(mod)"
+        >
+          <div class="timeline__card-top">
+            <span class="timeline__card-type">{{ typeLabel(mod.type) }}</span>
+            <span class="timeline__card-dur">{{ fmtDuration(mod.duration) }}</span>
+          </div>
+          <div class="timeline__card-btm" v-if="motionSummary(mod as any)">
+            <span class="timeline__motion-text">{{ motionSummary(mod as any) }}</span>
+          </div>
+        </div>
+      </template>
     </div>
 
     <!-- Progress bar -->
@@ -37,13 +54,11 @@ const store = useProjectStore();
 const scrollRef = ref<HTMLDivElement | null>(null);
 let dragIdx = -1;
 
-// ── Card click → select + seek ──
 function onCardClick(mod: Module) {
   store.selectModule(mod.id);
   store.seekTo(mod.start_time);
 }
 
-// ── Watch currentTime → drive video playback ──
 watch(() => store.currentTime, (t) => {
   const video = document.querySelector('.preview__video') as HTMLVideoElement | null;
   if (video && Math.abs(video.currentTime - t) > 0.5) {
@@ -64,35 +79,66 @@ function onDragOver(toIdx: number, _e: DragEvent) {
   dragIdx = toIdx;
   store.script.modules = mods;
 }
-function onDragEnd() {
-  dragIdx = -1;
-}
+function onDragEnd() { dragIdx = -1; }
 
-// ── Type label ──
 const typeLabel = (t: ModuleType): string => {
   const m: Record<ModuleType, string> = {
-    title: '开头',
-    video_segment: '高潮',
-    subtitle: '字幕',
-    transition: '转场',
-    audio: '音频',
-    effect: '特效',
+    title: '开头', video_segment: '高潮', subtitle: '字幕',
+    transition: '转场', audio: '音频', effect: '特效',
   };
   return m[t] || t;
 };
 
-// ── Duration format ──
 const fmtDuration = (s: number): string => {
   if (!s || s <= 0) return '—';
-  const sec = Math.round(s);
-  return `${sec}s`;
+  return `${Math.round(s)}s`;
 };
 
-// ── Progress ──
 const progressPct = computed(() => {
   if (!store.currentTime || !store.script.metadata.total_duration) return 0;
   return Math.min(100, (store.currentTime / store.script.metadata.total_duration) * 100);
 });
+
+/* ═══════════════════════════════════
+   Motion trend helpers
+   ═══════════════════════════════════ */
+// Read the PREVIOUS module's detail for the gap between module[i-1] and module[i]
+function detailOf(mod: any): any {
+  return mod?.detail || mod?.analysis || mod?.params || null;
+}
+
+function brightnessTrend(mod: any): string | null {
+  const d = detailOf(mod);
+  return d?.brightness_trend || null;
+}
+function scaleTrend(mod: any): string | null {
+  const d = detailOf(mod);
+  return d?.scale_trend || null;
+}
+function movementTrend(mod: any): string | null {
+  const d = detailOf(mod);
+  return d?.movement_trend || null;
+}
+
+function motionSummary(mod: any): string | null {
+  const d = detailOf(mod);
+  const parts: string[] = [];
+  // motion_trend / motion_description
+  if (d?.motion_trend) parts.push(d.motion_trend);
+  if (d?.motion_description) parts.push(d.motion_description);
+  // brightness / scale inline
+  if (d?.brightness_trend) parts.push('亮度' + (d.brightness_trend === '变亮' ? '↑' : '↓'));
+  if (d?.scale_trend) parts.push(d.scale_trend === '扩散' ? '扩散' : '聚拢');
+  // object_transitions
+  if (d?.object_transitions && Array.isArray(d.object_transitions)) {
+    for (const evt of d.object_transitions) {
+      const name = typeof evt === 'string' ? evt : (evt.name || evt.type || '');
+      const cnt = typeof evt === 'object' ? evt.count ?? 1 : 1;
+      if (name) parts.push(`${name}×${cnt}`);
+    }
+  }
+  return parts.length ? parts.join(' + ') : null;
+}
 </script>
 
 <style scoped>
@@ -112,23 +158,60 @@ const progressPct = computed(() => {
 }
 
 /* ── Module cards row ── */
-.timeline__modules {
+.timeline__track {
   flex: 1; display: flex; align-items: center;
-  padding: 0 12px; gap: 6px; overflow-x: auto;
+  padding: 0 12px; gap: 0; overflow-x: auto;
   scrollbar-width: thin;
   scrollbar-color: var(--border) transparent;
 }
 
+/* ── Trend marker between cards ── */
+.trend {
+  display: flex;
+  align-items: center;
+  gap: 2px;
+  flex-shrink: 0;
+  padding: 0 2px;
+  height: 100%;
+}
+.trend__icon {
+  font-size: 9px;
+  line-height: 1;
+  opacity: 0.5;
+  transition: opacity var(--transition);
+}
+.trend:hover .trend__icon {
+  opacity: 1;
+}
+.trend__bar {
+  width: 3px;
+  height: 24px;
+  border-radius: 2px;
+  flex-shrink: 0;
+  transition: opacity var(--transition);
+}
+.trend__bar--up {
+  background: linear-gradient(to top, var(--accent) 0%, transparent 100%);
+  opacity: 0.4;
+}
+.trend__bar--down {
+  background: linear-gradient(to bottom, var(--accent) 0%, transparent 100%);
+  opacity: 0.4;
+}
+
 /* ── Module card ── */
 .timeline__card {
-  height: 40px; border-radius: var(--radius-sm);
+  border-radius: var(--radius-sm);
   border: 1px solid var(--border);
   background: var(--bg-surface);
-  display: flex; align-items: center; justify-content: center;
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
   font-size: 11px; font-weight: 500;
   color: var(--text-secondary);
   cursor: pointer; transition: all var(--transition);
-  flex-shrink: 0; min-width: 60px; padding: 0 12px;
+  flex-shrink: 0; min-width: 60px; padding: 4px 10px;
+  gap: 1px;
 }
 .timeline__card:hover { background: var(--bg-hover); box-shadow: var(--shadow-sm); }
 .timeline__card--sel { border-color: var(--accent); }
@@ -141,14 +224,31 @@ const progressPct = computed(() => {
 .timeline__card--effect      { border-left: 3px solid #8b5cf6; }
 .timeline__card--video_segment { border-left: 3px solid #ef4444; }
 
-/* ── Card content ── */
+/* ── Card top row (type + dur) ── */
+.timeline__card-top {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+}
 .timeline__card-type {
   font-size: 11px; font-weight: 500;
   color: var(--text-secondary); white-space: nowrap;
 }
 .timeline__card-dur {
   font-size: 10px; color: var(--text-muted);
-  margin-left: 4px;
+}
+
+/* ── Card bottom row (motion summary) ── */
+.timeline__card-btm {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  max-width: 100%;
+}
+.timeline__motion-text {
+  font-size: 9px;
+  color: var(--accent);
+  opacity: 0.8;
 }
 
 /* ── Progress bar ── */
