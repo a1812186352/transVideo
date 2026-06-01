@@ -164,9 +164,9 @@ async function testConnection() {
 
 .ass-field input {
   padding: 8px 10px;
-  border: 1px solid var(--border-default);
+  border: 1px solid var(--border);
   border-radius: var(--radius-sm);
-  background: var(--bg-input);
+  background: var(--bg-surface);
   color: var(--text-primary);
   font-size: 13px;
   font-family: var(--font-mono);
@@ -178,7 +178,7 @@ async function testConnection() {
 
 .ass-field input:focus {
   outline: none;
-  border-color: var(--accent-amber);
+  border-color: var(--accent);
 }
 
 .ass-actions {
@@ -190,10 +190,10 @@ async function testConnection() {
 
 .ass-test-btn {
   padding: 7px 16px;
-  border: 1px solid var(--accent-amber);
+  border: 1px solid var(--accent);
   border-radius: var(--radius-sm);
   background: transparent;
-  color: var(--accent-amber);
+  color: var(--accent);
   font-size: 12px;
   font-weight: 500;
   cursor: pointer;
@@ -201,7 +201,7 @@ async function testConnection() {
 }
 
 .ass-test-btn:hover:not(:disabled) {
-  background: var(--accent-amber-dim);
+  background: var(--accent-subtle);
 }
 
 .ass-test-btn:disabled {
@@ -211,22 +211,22 @@ async function testConnection() {
 
 .ass-result {
   font-size: 12px;
-  color: var(--error);
+  color: #f85149;
 }
 
 .ass-result--ok {
-  color: var(--success);
+  color: #3fb950;
 }
 
 .ass-divider {
   height: 1px;
-  background: var(--border-default);
+  background: var(--border);
   margin: 8px 0;
 }
 
 .ass-section-label {
   font-size: 11px;
-  color: var(--accent-amber);
+  color: var(--accent);
   text-transform: uppercase;
   letter-spacing: 0.5px;
   font-weight: 600;
@@ -235,9 +235,9 @@ async function testConnection() {
 
 .ass-select {
   padding: 8px 10px;
-  border: 1px solid var(--border-default);
+  border: 1px solid var(--border);
   border-radius: var(--radius-sm);
-  background: var(--bg-input);
+  background: var(--bg-surface);
   color: var(--text-primary);
   font-size: 13px;
   font-family: var(--font-mono);
@@ -246,6 +246,6 @@ async function testConnection() {
 
 .ass-select:focus {
   outline: none;
-  border-color: var(--accent-amber);
+  border-color: var(--accent);
 }
 </style>

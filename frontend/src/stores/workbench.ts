@@ -394,7 +394,7 @@ export const useWorkbenchStore = defineStore('workbench', () => {
   }
 
   /* ═══════════════════════════════════
-     Shots (ScriptEditor callback)
+     Shots callback
      ═══════════════════════════════════ */
   function onShotsChange(shots: Array<{ index: number; text: string; duration: string; ref_material_ids: string[] }>) {
     // Rebuild modules from shots
