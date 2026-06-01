@@ -168,7 +168,7 @@ function onPreviewUpload(file: File) {
 }
 
 /* ── Zone areas ── */
-.zone--topbar    { grid-area: topbar; padding: 0; border-right: none; background: transparent; }
+.zone--topbar    { grid-area: topbar; padding: 0; border-right: none; background: transparent; flex-direction: row; align-items: center; }
 .zone--material  { grid-area: material; }
 .zone--preview   { grid-area: preview; border-right: none; background: var(--bg-root); }
 .zone--property  { grid-area: property; }
