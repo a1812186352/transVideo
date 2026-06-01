@@ -9,47 +9,59 @@
 
     <!-- ═══ Material panel (left) ═══ -->
     <aside class="zone zone--material" :style="{ width: leftWidth }">
-      <div class="zone__header">
-        <span class="zone__label">素材库</span>
-        <button class="zone__collapse" @click="leftCollapsed = !leftCollapsed">
-          {{ leftCollapsed ? '▶' : '◀' }}
-        </button>
+      <div class="zone__panel" v-show="!leftCollapsed">
+        <div class="zone__header">
+          <span class="zone__label">素材库</span>
+          <button class="zone__collapse" @click="leftCollapsed = true" title="折叠">◀</button>
+        </div>
+        <div class="zone__body">
+          <MaterialPanel :api-base-url="project.apiBaseUrl" />
+        </div>
       </div>
-      <div class="zone__body">
-        <MaterialPanel :api-base-url="project.apiBaseUrl" />
+      <div class="zone__handle" v-show="leftCollapsed" @click="leftCollapsed = false" title="展开">
+        <span class="zone__handle-arrow">▶</span>
+        <span class="zone__handle-label">素材</span>
       </div>
     </aside>
 
     <!-- ═══ Preview (center) ═══ -->
     <main class="zone zone--preview">
       <div class="zone__body">
-        <PreviewPanel @upload="ws.triggerVideoUpload()" />
+        <PreviewPanel @upload="onPreviewUpload" />
       </div>
     </main>
 
     <!-- ═══ Property panel (right) ═══ -->
     <aside class="zone zone--property" :style="{ width: rightWidth }">
-      <div class="zone__header">
-        <span class="zone__label">属性</span>
-        <button class="zone__collapse" @click="rightCollapsed = !rightCollapsed">
-          {{ rightCollapsed ? '◀' : '▶' }}
-        </button>
+      <div class="zone__panel" v-show="!rightCollapsed">
+        <div class="zone__header">
+          <span class="zone__label">属性</span>
+          <button class="zone__collapse" @click="rightCollapsed = true" title="折叠">▶</button>
+        </div>
+        <div class="zone__body">
+          <PropertyPanel />
+        </div>
       </div>
-      <div class="zone__body">
-        <PropertyPanel />
+      <div class="zone__handle" v-show="rightCollapsed" @click="rightCollapsed = false" title="展开">
+        <span class="zone__handle-arrow">◀</span>
+        <span class="zone__handle-label">属性</span>
       </div>
     </aside>
 
     <!-- ═══ Generate panel (far right) ═══ -->
     <aside class="zone zone--generate" :style="{ width: genWidth }">
-      <div class="zone__header">
-        <span class="zone__label">生成视频</span>
-        <button class="zone__collapse" @click="genCollapsed = !genCollapsed">
-          {{ genCollapsed ? '◀' : '▶' }}
-        </button>
+      <div class="zone__panel" v-show="!genCollapsed">
+        <div class="zone__header">
+          <span class="zone__label">生成视频</span>
+          <button class="zone__collapse" @click="genCollapsed = true" title="折叠">▶</button>
+        </div>
+        <div class="zone__body">
+          <GeneratePanel />
+        </div>
       </div>
-      <div class="zone__body">
-        <GeneratePanel />
+      <div class="zone__handle" v-show="genCollapsed" @click="genCollapsed = false" title="展开">
+        <span class="zone__handle-arrow">◀</span>
+        <span class="zone__handle-label">生成</span>
       </div>
     </aside>
 
@@ -100,10 +112,11 @@ const genCollapsed = ref(false);
 const LEFT_FULL = '240px';
 const RIGHT_FULL = '300px';
 const GEN_FULL = '280px';
+const HANDLE_W = '22px';
 
-const leftWidth = computed(() => (leftCollapsed.value ? '0px' : LEFT_FULL));
-const rightWidth = computed(() => (rightCollapsed.value ? '0px' : RIGHT_FULL));
-const genWidth = computed(() => (genCollapsed.value ? '0px' : GEN_FULL));
+const leftWidth = computed(() => (leftCollapsed.value ? HANDLE_W : LEFT_FULL));
+const rightWidth = computed(() => (rightCollapsed.value ? HANDLE_W : RIGHT_FULL));
+const genWidth = computed(() => (genCollapsed.value ? HANDLE_W : GEN_FULL));
 
 const workbenchStyle = computed(() => ({
   '--left-width': leftWidth.value,
@@ -111,8 +124,11 @@ const workbenchStyle = computed(() => ({
   '--gen-width': genWidth.value,
 }));
 
-// ── Wire TopBar upload event → workbench store ──
+// ── Wire upload events → workbench store ──
 function onTopBarUpload(file: File) {
+  ws.doUpload(file);
+}
+function onPreviewUpload(file: File) {
   ws.doUpload(file);
 }
 </script>
@@ -156,7 +172,7 @@ function onTopBarUpload(file: File) {
 .zone--material  { grid-area: material; }
 .zone--preview   { grid-area: preview; border-right: none; background: var(--bg-root); }
 .zone--property  { grid-area: property; }
-.zone--generate  { grid-area: generate; border-right: none; }
+.zone--generate  { grid-area: generate; }
 .zone--timeline  { grid-area: timeline; flex-direction: row; border-top: 1px solid var(--border); background: var(--bg-surface); }
 
 /* ── Zone header ── */
@@ -196,6 +212,43 @@ function onTopBarUpload(file: File) {
 .zone__collapse:hover {
   background: var(--bg-hover);
   color: var(--text-primary);
+}
+
+/* ── Panel inner wrapper (visible when not collapsed) ── */
+.zone__panel {
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+  width: 100%;
+}
+
+/* ── Handle bar (visible when collapsed) ── */
+.zone__handle {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  height: 100%;
+  width: 22px;
+  cursor: pointer;
+  user-select: none;
+  color: var(--text-muted);
+  font-size: 10px;
+  gap: 4px;
+  transition: background var(--transition), color var(--transition);
+}
+.zone__handle:hover {
+  background: var(--bg-hover);
+  color: var(--accent);
+}
+.zone__handle-arrow {
+  font-size: 12px;
+  line-height: 1;
+}
+.zone__handle-label {
+  writing-mode: vertical-rl;
+  font-size: 9px;
+  letter-spacing: 1px;
 }
 
 /* ── Zone body ── */

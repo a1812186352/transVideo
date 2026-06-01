@@ -75,8 +75,8 @@ function openSettings() {
   display: flex;
   align-items: center;
   height: 48px;
-  padding: 0 16px;
-  background: var(--bg-surface);
+  padding: 0 20px;
+  background: var(--bg-panel);
   border-bottom: 1px solid var(--border);
   gap: 16px;
   flex-shrink: 0;
@@ -90,10 +90,8 @@ function openSettings() {
   font-size: 15px;
   font-weight: 700;
   color: var(--accent);
-  letter-spacing: -0.3px;
   user-select: none;
   flex-shrink: 0;
-  min-width: 140px;
 }
 .topbar__dot {
   width: 8px;
@@ -137,8 +135,6 @@ function openSettings() {
   align-items: center;
   gap: 12px;
   flex-shrink: 0;
-  min-width: 140px;
-  justify-content: flex-end;
 }
 
 /* ── Segmented theme toggle ── */

@@ -85,7 +85,7 @@ const store = useProjectStore();
 const ws = useWorkbenchStore();
 
 const emit = defineEmits<{
-  upload: [];
+  upload: [file: File];
 }>();
 
 // ── State ──
@@ -139,20 +139,16 @@ function seekTo(time: number) {
   if (videoRef.value) videoRef.value.currentTime = time;
   store.seekTo(time);
 }
-function triggerUpload() { emit('upload'); }
+function triggerUpload() {
+  // Clicking the dropzone triggers the TopBar file input
+  (document.querySelector('.topbar__upload') as HTMLButtonElement)?.click();
+}
 
 function onDrop(e: DragEvent) {
   dragOver.value = false;
   const file = e.dataTransfer?.files?.[0];
   if (file && file.type.startsWith('video/')) {
-    // parent handles upload via emit + event
-    const dataTransfer = new DataTransfer();
-    dataTransfer.items.add(file);
-    const input = document.createElement('input');
-    input.type = 'file';
-    input.files = dataTransfer.files;
-    input.dispatchEvent(new Event('change'));
-    emit('upload');
+    emit('upload', file);
   }
 }
 </script>
