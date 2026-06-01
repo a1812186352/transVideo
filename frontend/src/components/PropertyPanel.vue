@@ -22,6 +22,8 @@
       </button>
     </div>
 
+
+
     <div class="prop__body" v-if="selectedModule">
       <!-- ═══ Scene Tags ═══ -->
       <div class="prop-group">
@@ -30,7 +32,7 @@
           <div v-if="sceneTags.length" class="prop-tags">
             <span v-for="tag in sceneTags" :key="tag" class="prop-tag">{{ tag }}</span>
           </div>
-          <span v-else class="prop-empty">{{ analysisFallback }}</span>
+          <span v-else class="prop-empty">等待分析</span>
         </div>
       </div>
 
@@ -38,9 +40,9 @@
       <div class="prop-group">
         <div class="prop-group__head" @click="toggleGroup('visual')">视觉元素 <span class="prop-group__arrow" :class="{ open: groups.visual }">▼</span></div>
         <div class="prop-group__body" v-show="groups.visual">
-          <div class="prop-row"><span class="prop-dot comp" /> 构图: {{ detail?.composition || analysisFallback }}</div>
-          <div class="prop-row"><span class="prop-dot cont" /> 内容: {{ detail?.visual_elements?.join('、') || analysisFallback }}</div>
-          <div class="prop-row"><span class="prop-dot motion" /> 动效: {{ detail?.motion || analysisFallback }}</div>
+          <div class="prop-row"><span class="prop-dot comp" /> 构图: {{ safeVal(detail?.composition) }}</div>
+          <div class="prop-row"><span class="prop-dot cont" /> 内容: {{ safeVal(detail?.visual_elements) }}</div>
+          <div class="prop-row"><span class="prop-dot motion" /> 动效: {{ safeVal(detail?.motion) }}</div>
         </div>
       </div>
 
@@ -51,7 +53,7 @@
           <div class="prop-swatches" v-if="detail?.color_palette?.length">
             <span v-for="(c, i) in detail.color_palette" :key="i" class="prop-swatch" :style="{ background: c }" />
           </div>
-          <div class="prop-row" style="margin-top: 4px;">{{ detail?.color_tone || analysisFallback }}</div>
+          <div class="prop-row" style="margin-top: 4px;">{{ safeVal(detail?.color_tone) }}</div>
         </div>
       </div>
 
@@ -59,7 +61,7 @@
       <div class="prop-group">
         <div class="prop-group__head" @click="toggleGroup('audio')">音频分析 <span class="prop-group__arrow" :class="{ open: groups.audio }">▼</span></div>
         <div class="prop-group__body" v-show="groups.audio">
-          <div class="prop-row">BPM: {{ detail?.bpm || analysisFallback }} · 类型: {{ detail?.bgm_type || analysisFallback }}</div>
+          <div class="prop-row">BPM: {{ safeVal(detail?.bpm) }} · 类型: {{ safeVal(detail?.bgm_type) }}</div>
           <div v-if="detail?.bpm" class="prop-waveform">
             <span v-for="(v, i) in energyBars" :key="i" class="prop-bar" :style="{ height: v + '%' }" />
           </div>
@@ -73,7 +75,7 @@
           <div v-if="ocrTexts.length" class="prop-ocr">
             <div v-for="(t, i) in ocrTexts" :key="i" class="prop-ocr__line">{{ t }}</div>
           </div>
-          <span v-else class="prop-empty">{{ analysisFallback }}</span>
+          <span v-else class="prop-empty">等待分析</span>
         </div>
       </div>
     </div>
@@ -100,8 +102,27 @@ function toggleGroup(key: keyof typeof groups) {
   groups[key] = !groups[key];
 }
 
+const fmtDuration = (s: number): string => {
+  if (!s || s <= 0) return '—';
+  const min = Math.floor(s / 60);
+  const sec = Math.floor(s % 60);
+  return min > 0 ? `${min}:${String(sec).padStart(2, '0')}` : `0:${String(sec).padStart(2, '0')}`;
+};
+
 const selectedModule = computed(() => store.selectedModule);
-const detail = computed(() => (selectedModule.value as any)?.detail || null);
+
+// 兼容后端可能的字段名：detail / analysis / params
+const detail = computed(() => {
+  const mod = selectedModule.value as any;
+  return mod?.detail || mod?.analysis || mod?.params || null;
+});
+
+// 空值安全格式化
+function safeVal(val: any, fallback = '等待分析'): string {
+  if (val === null || val === undefined || val === '') return fallback;
+  if (Array.isArray(val) && val.length === 0) return fallback;
+  return Array.isArray(val) ? val.join('、') : String(val);
+}
 
 const sceneTags = computed(() => {
   const d = detail.value;
@@ -111,13 +132,6 @@ const sceneTags = computed(() => {
 const ocrTexts = computed(() => {
   const d = detail.value;
   return d?.ocr_texts || [];
-});
-
-// Generate 20 energy bars from mock or real energy data
-const analysisFallback = computed(() => {
-  if (store.analysisStatus === 'idle') return '等待分析…';
-  if (store.analysisStatus === 'processing') return '正在分析…';
-  return '—';
 });
 
 const energyBars = computed(() => {
@@ -265,6 +279,26 @@ const energyBars = computed(() => {
   color: var(--text-muted);
 }
 
+/* ── Video metadata card ── */
+.prop-meta {
+  padding: 8px 12px;
+  border-bottom: 1px solid var(--border);
+  flex-shrink: 0;
+}
+.prop-meta-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 2px 0;
+  font-size: 12px;
+}
+.prop-meta-label { color: var(--text-muted); }
+.prop-meta-value {
+  color: var(--text-primary);
+  font-family: var(--font-mono);
+  font-size: 11px;
+}
+
 /* ── Analyze button ── */
 .prop-analyze {
   padding: 6px 12px;
@@ -296,7 +330,10 @@ const energyBars = computed(() => {
   border: 1px solid var(--border);
 }
 .prop-analyze-btn--done {
-  background: #1a7f37;
+  background: var(--bg-surface);
+  color: var(--accent);
+  border: 1px solid var(--accent);
+  cursor: default;
 }
 .prop-analyze-btn--fail {
   background: #da3633;
