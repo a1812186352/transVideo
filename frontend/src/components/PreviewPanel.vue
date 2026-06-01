@@ -32,6 +32,32 @@
           <div class="preview__spinner" />
           <span class="preview__step">{{ currentStep }}</span>
         </div>
+        <!-- Analyze button (shown after upload, before/during/after analysis) -->
+        <div v-if="showAnalyzeBtn" class="preview__actions">
+          <button
+            class="preview__analyze-btn"
+            :class="{
+              'preview__analyze-btn--processing': store.analysisStatus === 'processing',
+              'preview__analyze-btn--done': store.analysisStatus === 'completed',
+              'preview__analyze-btn--fail': store.analysisStatus === 'failed',
+            }"
+            :disabled="store.analysisStatus === 'processing'"
+            @click.stop="ws.handleAnalyze()"
+          >
+            <template v-if="store.analysisStatus === 'idle'">▶ 开始分析</template>
+            <template v-else-if="store.analysisStatus === 'processing'">
+              <span class="preview__spinner-sm" /> 分析中…
+            </template>
+            <template v-else-if="store.analysisStatus === 'completed'">✓ 分析完成</template>
+            <template v-else-if="store.analysisStatus === 'failed'">↻ 重试分析</template>
+          </button>
+          <div v-if="store.analysisStatus === 'completed'" class="preview__eta">
+            实际耗时: {{ ws.analysisActualTime || '—' }}
+          </div>
+          <div v-else-if="store.analysisStatus === 'idle' && totalDuration > 0" class="preview__eta">
+            预计分析: {{ ws.fmtEta(totalDuration) }}
+          </div>
+        </div>
       </div>
     </div>
 
@@ -55,8 +81,10 @@
 <script setup lang="ts">
 import { ref, computed, onMounted, watch } from 'vue';
 import { useProjectStore } from '../stores/project';
+import { useWorkbenchStore } from '../stores/workbench';
 
 const store = useProjectStore();
+const ws = useWorkbenchStore();
 
 const emit = defineEmits<{
   upload: [];
@@ -79,6 +107,10 @@ const currentStep = computed(() => {
   // Show latest monitor log message as step indicator
   return '正在分析…';
 });
+const showAnalyzeBtn = computed(() =>
+  store.videoId && (store.analysisStatus === 'idle' || store.analysisStatus === 'processing' || store.analysisStatus === 'completed' || store.analysisStatus === 'failed')
+);
+const totalDuration = computed(() => store.script.metadata.total_duration || 0);
 
 // ── Thumbnails (generated from video metadata) ──
 interface Thumb { time: number; src: string; }
@@ -252,5 +284,66 @@ function onDrop(e: DragEvent) {
   height: 100%;
   object-fit: cover;
   display: block;
+}
+
+/* ── Analyze action bar ── */
+.preview__actions {
+  position: absolute;
+  bottom: 0;
+  left: 0;
+  right: 0;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 10px 14px;
+  background: linear-gradient(transparent, rgba(0,0,0,0.7));
+  z-index: 5;
+}
+.preview__analyze-btn {
+  padding: 7px 18px;
+  border: none;
+  border-radius: var(--radius-sm);
+  background: var(--accent);
+  color: #fff;
+  font-size: 12px;
+  font-weight: 600;
+  cursor: pointer;
+  transition: all var(--transition);
+  white-space: nowrap;
+}
+.preview__analyze-btn:hover:not(:disabled) {
+  background: var(--accent-hover);
+}
+.preview__analyze-btn:disabled {
+  opacity: 0.6;
+  cursor: not-allowed;
+}
+.preview__analyze-btn--processing {
+  background: var(--bg-surface);
+  color: var(--text-primary);
+  border: 1px solid var(--border);
+}
+.preview__analyze-btn--done {
+  background: #1a7f37;
+}
+.preview__analyze-btn--fail {
+  background: #da3633;
+}
+.preview__spinner-sm {
+  display: inline-block;
+  width: 12px;
+  height: 12px;
+  border: 2px solid rgba(255,255,255,0.2);
+  border-top-color: #fff;
+  border-radius: 50%;
+  animation: spin 0.7s linear infinite;
+  vertical-align: middle;
+  margin-right: 4px;
+}
+.preview__eta {
+  font-size: 10px;
+  color: rgba(255,255,255,0.7);
+  font-family: var(--font-mono);
+  white-space: nowrap;
 }
 </style>
