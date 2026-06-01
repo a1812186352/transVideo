@@ -194,17 +194,22 @@ function moodLabel(mood: string): string {
   return MOOD_MAP[mood] || mood;
 }
 
-/* ── 3d: OCR with size rank ── */
+/* ── 3d: OCR — prefer structured items, fallback to plain texts ── */
 interface OcrItem { text: string; sizeRank: string | null; lowConfidence: boolean }
 const ocrItems = computed<OcrItem[]>(() => {
-  const raw = detail.value?.ocr_texts || [];
-  const ranks = detail.value?.text_size_rank || {};
-  const lowFlags = detail.value?.low_confidence_texts || {};
-  return raw.map((text: string, i: number) => ({
-    text,
-    sizeRank: ranks && typeof ranks === 'object' ? (ranks[text] || ranks[i] || null) : null,
-    lowConfidence: lowFlags && typeof lowFlags === 'object' ? !!(lowFlags[text] || lowFlags[i]) : false,
-  }));
+  const d = detail.value;
+  // 优先读取结构化字段
+  const structured = d?.ocr_texts_structured;
+  if (structured && Array.isArray(structured) && structured.length) {
+    return structured.map((item: any) => ({
+      text: item.text || '',
+      sizeRank: item.text_size_rank || null,
+      lowConfidence: !!item.low_confidence,
+    }));
+  }
+  // 回退到纯文本数组
+  const raw = d?.ocr_texts || [];
+  return raw.map((text: string) => ({ text, sizeRank: null, lowConfidence: false }));
 });
 
 function sizeLabel(rank: string): string {

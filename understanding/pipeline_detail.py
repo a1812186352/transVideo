@@ -45,6 +45,7 @@ def build_detail(
     visual_features: Optional[List[dict]] = None,
     audio_data: Optional[Dict[str, Any]] = None,
     watermark_set: Optional[set] = None,
+    prev_motion: Optional[Dict[str, Any]] = None,
 ) -> Dict[str, Any]:
     """Build per-module analysis detail from real signal data.
 
@@ -217,6 +218,7 @@ def build_detail(
 
     # ── OCR texts in this segment ──
     ocr_texts_in_seg: List[str] = []
+    ocr_texts_structured: List[dict] = []
     for ocr in ocr_data:
         ts = ocr.get("timestamp", -1)
         if ts < 0 or ts < start or ts > end:
@@ -225,16 +227,31 @@ def build_detail(
             t = ""
             if isinstance(region, dict):
                 t = region.get("text", "")
+                # Collect structured dict for new field
+                if t and (not watermark_set or t not in watermark_set):
+                    ocr_texts_structured.append({
+                        "text": t,
+                        "text_size_rank": region.get("text_size_rank", "small"),
+                        "low_confidence": region.get("low_confidence", False),
+                    })
             elif isinstance(region, str):
                 t = region
+                if t and (not watermark_set or t not in watermark_set):
+                    ocr_texts_structured.append({
+                        "text": t, "text_size_rank": "small", "low_confidence": False,
+                    })
             if t and (not watermark_set or t not in watermark_set):
                 ocr_texts_in_seg.append(t)
 
     # ── Signal-layer fields: HSV color, mood, YOLO quality ──
 
-    # color_zone_pcts — per-zone mean across segment frames
+    # color_zone_pcts — per-zone mean across segment frames (English keys)
     color_zone_pcts: Dict[str, float] = {
-        "白色/浅灰": 0.0, "暖色": 0.0, "冷色": 0.0, "中性": 0.0, "暗色": 0.0,
+        "white": 0.0, "warm": 0.0, "cool": 0.0, "neutral": 0.0, "dark": 0.0,
+    }
+    ZONE_KEY_MAP = {
+        "白色/浅灰": "white", "暖色": "warm", "冷色": "cool",
+        "中性": "neutral", "暗色": "dark",
     }
     if visual_features and total_dur > 0:
         n_vf = len(visual_features)
@@ -244,18 +261,14 @@ def build_detail(
         i_e_vf = max(i_s_vf + 1, min(i_e_vf, n_vf))
         seg_vf = visual_features[i_s_vf:i_e_vf]
         if seg_vf:
-            zone_keys = ["白色/浅灰", "暖色", "冷色", "中性", "暗色"]
-            for k in zone_keys:
-                vals = [f.get("color_zone_pcts", {}).get(k, 0.0) for f in seg_vf]
-                color_zone_pcts[k] = round(sum(vals) / len(vals), 1)
+            for cn_key, en_key in ZONE_KEY_MAP.items():
+                vals = [f.get("color_zone_pcts", {}).get(cn_key, 0.0) for f in seg_vf]
+                color_zone_pcts[en_key] = round(sum(vals) / len(vals), 1)
 
-    # is_dominantly_neutral — >50% of frames have it true
-    is_dominantly_neutral = False
-    if visual_features and total_dur > 0:
-        seg_vf = _slice_visual_features(visual_features, start, end, total_dur)
-        if seg_vf:
-            neutral_count = sum(1 for f in seg_vf if f.get("is_dominantly_neutral", False))
-            is_dominantly_neutral = (neutral_count / len(seg_vf)) > 0.5
+    # is_dominantly_neutral — white + neutral + dark > 50% total
+    is_dominantly_neutral = (
+        color_zone_pcts["white"] + color_zone_pcts["neutral"] + color_zone_pcts["dark"] > 50.0
+    )
 
     # yolo_quality_flag — worst flag across segment frames
     yolo_quality_flag = "reliable"
@@ -275,6 +288,60 @@ def build_detail(
         mood = audio_data.get("mood", "")
         mood_confidence = audio_data.get("mood_confidence", 0.0)
         mood_secondary = audio_data.get("mood_secondary", "")
+
+    # ── Inter-module motion trend ──
+
+    bc = vf_structured.get("brightness_curve", [])
+    comp_chg = vf_structured.get("composition_changes", 0.0)
+    cur_flow = vf_structured.get("motion_description", {}).get("mean", 0.0)
+
+    # brightness_trend: compare first vs last frames
+    brightness_trend = "稳定"
+    brightness_ratio = 1.0
+    if len(bc) >= 3:
+        first_val = sum(bc[:3]) / 3
+        last_val = sum(bc[-3:]) / 3
+        if first_val > 0.01:
+            brightness_ratio = round(last_val / first_val, 3)
+            if brightness_ratio > 1.1:
+                brightness_trend = "变亮"
+            elif brightness_ratio < 0.9:
+                brightness_trend = "变暗"
+
+    # scale_trend: composition_changes
+    scale_trend = "稳定"
+    if comp_chg > 0.1:
+        scale_trend = "扩散"
+    elif comp_chg < -0.1:
+        scale_trend = "聚拢"
+
+    # movement_trend: compare current vs previous segment flow
+    movement_trend = "稳定"
+    movement_ratio = 1.0
+    if prev_motion and cur_flow > 0.01:
+        prev_flow_val = prev_motion.get("mean", 0.0)
+        if prev_flow_val > 0.01:
+            movement_ratio = round(cur_flow / prev_flow_val, 3)
+            if movement_ratio > 1.5:
+                movement_trend = "动效增强"
+            elif movement_ratio < 0.6:
+                movement_trend = "动效减弱"
+    elif prev_motion is None:
+        movement_trend = "起始段"
+
+    motion_trend = {
+        "brightness_trend": brightness_trend,
+        "brightness_ratio": brightness_ratio,
+        "scale_trend": scale_trend,
+        "scale_value": round(comp_chg, 3),
+        "movement_trend": movement_trend,
+        "movement_ratio": movement_ratio,
+    }
+
+    # object_transitions — from derive_visual_from_features structured output
+    object_transitions = vf_structured.get("object_transitions", {
+        "fade_in_count": 0, "fade_out_count": 0,
+    })
 
     # ── Color palette ──
     if "暖" in color_tone or "高饱和" in color_tone:
@@ -312,6 +379,7 @@ def build_detail(
         "bpm": bpm,
         "bgm_type": bgm_type,
         "ocr_texts": ocr_texts_in_seg[:10] if ocr_texts_in_seg else [],
+        "ocr_texts_structured": ocr_texts_structured[:10] if ocr_texts_structured else [],
         "voice_content": voice_content,
         "emotion_peak": emotion_peak,
         "energy_peak_value": round(energy_peak_value, 3),
@@ -326,9 +394,11 @@ def build_detail(
         "mood": mood,
         "mood_confidence": mood_confidence,
         "mood_secondary": mood_secondary,
-        "brightness_curve": vf_structured.get("brightness_curve", []),
+        "brightness_curve": bc,
         "composition_changes": vf_structured.get("composition_changes", 0.0),
         "motion_description": vf_structured.get("motion_description", {}),
+        "motion_trend": motion_trend,
+        "object_transitions": object_transitions,
     }
 
 
@@ -572,6 +642,28 @@ def derive_visual_from_features(
             "max": round(flow_max, 2),
             "label": motion,
         }
+
+    # object_transitions — YOLO bbox disappear/appear per frame pair
+    fade_in_cnt, fade_out_cnt = 0, 0
+    prev_classes: set = set()
+    for f in frames:
+        cur_classes: set = set()
+        for o in (f.get("yolo_objects", []) or []):
+            cls = o.get("class_name", "")
+            if cls:
+                cur_classes.add(cls)
+        if prev_classes:
+            new = cur_classes - prev_classes
+            gone = prev_classes - cur_classes
+            if new:
+                fade_in_cnt += len(new)
+            if gone:
+                fade_out_cnt += len(gone)
+        prev_classes = cur_classes
+    structured["object_transitions"] = {
+        "fade_in_count": fade_in_cnt,
+        "fade_out_count": fade_out_cnt,
+    }
 
     return result, structured
 

@@ -109,33 +109,37 @@ function detailOf(mod: any): any {
 
 function brightnessTrend(mod: any): string | null {
   const d = detailOf(mod);
-  return d?.brightness_trend || null;
+  const mt = d?.motion_trend;
+  return mt?.brightness_trend || null;
 }
 function scaleTrend(mod: any): string | null {
   const d = detailOf(mod);
-  return d?.scale_trend || null;
+  const mt = d?.motion_trend;
+  return mt?.scale_trend || null;
 }
 function movementTrend(mod: any): string | null {
   const d = detailOf(mod);
-  return d?.movement_trend || null;
+  const mt = d?.motion_trend;
+  return mt?.movement_trend || null;
 }
 
 function motionSummary(mod: any): string | null {
   const d = detailOf(mod);
   const parts: string[] = [];
-  // motion_trend / motion_description
-  if (d?.motion_trend) parts.push(d.motion_trend);
-  if (d?.motion_description) parts.push(d.motion_description);
-  // brightness / scale inline
-  if (d?.brightness_trend) parts.push('亮度' + (d.brightness_trend === '变亮' ? '↑' : '↓'));
-  if (d?.scale_trend) parts.push(d.scale_trend === '扩散' ? '扩散' : '聚拢');
-  // object_transitions
-  if (d?.object_transitions && Array.isArray(d.object_transitions)) {
-    for (const evt of d.object_transitions) {
-      const name = typeof evt === 'string' ? evt : (evt.name || evt.type || '');
-      const cnt = typeof evt === 'object' ? evt.count ?? 1 : 1;
-      if (name) parts.push(`${name}×${cnt}`);
-    }
+  const md = d?.motion_description;
+  if (md?.label) parts.push(md.label);
+  for (const k of ['brightness_trend', 'scale_trend', 'movement_trend']) {
+    const v = d?.motion_trend?.[k];
+    if (!v) continue;
+    if (k === 'brightness_trend') parts.push('亮度' + (v === '变亮' ? '↑' : '↓'));
+    else if (k === 'scale_trend') parts.push(v);
+    else if (k === 'movement_trend') parts.push(v);
+  }
+  // object_transitions as dict
+  const ot = d?.object_transitions;
+  if (ot) {
+    if (ot.fade_in_count > 0) parts.push(`物体淡入×${ot.fade_in_count}`);
+    if (ot.fade_out_count > 0) parts.push(`物体淡出×${ot.fade_out_count}`);
   }
   return parts.length ? parts.join(' + ') : null;
 }

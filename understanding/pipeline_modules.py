@@ -79,6 +79,9 @@ def build_module_tree(
     # ── Global watermark scan ──
     watermark_set = detect_watermarks(structure_segments, ocr_data)
 
+    # Track previous segment's motion for inter-module trend
+    prev_motion: Optional[Dict[str, Any]] = None
+
     for i, seg in enumerate(structure_segments):
         seg_type = seg.get("structure_type", "unclassified")
         seg_label = seg.get("label", f"segment_{i}")
@@ -104,7 +107,11 @@ def build_module_tree(
             visual_features=visual_features,
             audio_data=audio_data,
             watermark_set=watermark_set,
+            prev_motion=prev_motion,
         )
+
+        # Save current motion for next iteration
+        prev_motion = detail.get("motion_description")
 
         base = {
             "id": uuid.uuid4().hex[:12],
