@@ -197,3 +197,63 @@ async def get_thumbnails(video_id: str, interval: float = Query(3.0, ge=0.5, le=
 
     cap.release()
     return thumbnails
+
+
+@router.get("/video/{video_id}/filmstrip")
+async def get_filmstrip(video_id: str, count: int = Query(20, ge=5, le=100)) -> List[dict]:
+    """Extract evenly-spaced thumbnails for the filmstrip preview bar.
+
+    Unlike ``/thumbnails`` (interval-based), this endpoint returns exactly
+    ``count`` frames evenly distributed across the full video duration.
+    Thumbnails are 80px wide for compact display.
+
+    Args:
+        video_id: The video ID returned from upload.
+        count: Number of thumbnails (default 20, range 5-100).
+
+    Returns:
+        List of dicts: {timestamp, data_uri}
+    """
+    found = None
+    for fname in os.listdir(UPLOAD_DIR):
+        if fname.startswith(video_id):
+            found = os.path.join(UPLOAD_DIR, fname)
+            break
+    if not found:
+        raise HTTPException(status_code=404, detail="Video not found")
+
+    cap = cv2.VideoCapture(found)
+    if not cap.isOpened():
+        raise HTTPException(status_code=500, detail="Cannot open video file")
+
+    fps = cap.get(cv2.CAP_PROP_FPS)
+    total_frames = int(cap.get(cv2.CAP_PROP_FRAME_COUNT))
+    duration = total_frames / fps if fps > 0 else 0
+
+    if duration <= 0 or count < 2:
+        cap.release()
+        return []
+
+    thumbnails: List[dict] = []
+    max_width = 80
+    interval = duration / (count - 1)
+
+    for i in range(count):
+        t = i * interval
+        frame_idx = min(int(t * fps), total_frames - 1)
+        cap.set(cv2.CAP_PROP_POS_FRAMES, frame_idx)
+        ret, frame = cap.read()
+        if not ret:
+            break
+
+        h, w = frame.shape[:2]
+        scale = max_width / w
+        new_h = int(h * scale)
+        thumb = cv2.resize(frame, (max_width, new_h), interpolation=cv2.INTER_AREA)
+        _, buf = cv2.imencode(".jpg", thumb, [cv2.IMWRITE_JPEG_QUALITY, 60])
+        data_uri = f"data:image/jpeg;base64,{base64.b64encode(buf).decode('utf-8')}"
+
+        thumbnails.append({"timestamp": round(t, 1), "data_uri": data_uri})
+
+    cap.release()
+    return thumbnails

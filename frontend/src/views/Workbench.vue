@@ -141,7 +141,7 @@ function onPreviewUpload(file: File) {
 .workbench {
   display: grid;
   grid-template-columns: var(--left-width, 240px) 1fr var(--right-width, 300px) var(--gen-width, 280px);
-  grid-template-rows: 48px 1fr 72px;
+  grid-template-rows: 48px 1fr 120px;
   grid-template-areas:
     "topbar   topbar   topbar   topbar"
     "material preview  property generate"
@@ -262,6 +262,8 @@ function onPreviewUpload(file: File) {
 /* ── Timeline body ── */
 .zone--timeline .zone__body {
   flex-direction: column;
+  height: 100%;
+  overflow: hidden;
 }
 
 /* ═══════════════════════════════════════

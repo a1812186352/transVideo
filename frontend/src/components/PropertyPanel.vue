@@ -98,9 +98,15 @@
             </span>
             <span v-if="detail.mood_secondary" class="prop-mood__sec">次情绪: {{ moodLabel(detail.mood_secondary) }}</span>
           </div>
-          <div v-if="detail?.bpm" class="prop-waveform">
-            <span v-for="(v, i) in energyBars" :key="i" class="prop-bar" :style="{ height: v + '%' }" />
-          </div>
+          <AudioWaveform
+            v-if="detail?.energy_curve?.length"
+            :energy-curve="detail.energy_curve"
+            :duration="store.script.metadata.total_duration || 60"
+            :current-time="store.currentTime"
+            :bpm="detail?.bpm"
+            :mood-labels="waveMoods"
+            @seek="store.seekTo"
+          />
         </div>
       </div>
 
@@ -130,6 +136,7 @@
 import { computed, reactive } from 'vue';
 import { useProjectStore } from '../stores/project';
 import { useWorkbenchStore } from '../stores/workbench';
+import AudioWaveform from './AudioWaveform.vue';
 
 const store = useProjectStore();
 const ws = useWorkbenchStore();
@@ -221,6 +228,20 @@ function sizeClass(rank: string | null): string {
   if (rank === 'small') return 'ocr-size-sm';
   return '';
 }
+
+// Mood labels mapped to waveform zones
+const MOOD_COLORS: Record<string, string> = {
+  energetic: '#ef4444', calm: '#3b82f6', cheerful: '#f59e0b',
+  tense: '#8b5cf6', melancholy: '#10b981', neutral: '#6b7280',
+};
+const waveMoods = computed(() => {
+  const d = detail.value;
+  if (!d?.mood || !d?.duration) return [];
+  // Place mood marker at 30% and 70% of duration for visual reference
+  return [
+    { at: d.duration * 0.3, label: d.mood, color: MOOD_COLORS[d.mood] || '#6b7280' },
+  ];
+});
 
 const energyBars = computed(() => {
   const d = detail.value;

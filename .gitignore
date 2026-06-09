@@ -1,21 +1,42 @@
 # Python
 __pycache__/
 *.pyc
+*.pyo
 
 # Node
 node_modules/
 dist/
 
-# Runtime data
+# Runtime generated data
 job_store/
 output/
 instances/*.mov
 instances/*.mp4
+instances/frames/
+instances/job_store/
+instances/.mov/
+instances/.mp4/
+*.db
+*.db-shm
+*.db-wal
 
-# IDE
+# Downloaded ML models
+yolov8n.pt
+*.pt
+
+# IDE / Editor
 .vscode/
 .idea/
+*.swp
+*.swo
 
 # OS
 .DS_Store
 Thumbs.db
+Desktop.ini
+
+# Agent / Tool config logs
+.reasonix/
+
+# Test artifacts
+.pytest_cache/
