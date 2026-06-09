@@ -48,13 +48,16 @@ import { ref, computed, watch } from 'vue';
 import { useProjectStore } from '../stores/project';
 import { useTimelineStore } from '../stores/timelineStore';
 import { usePlaybackStore } from '../stores/playbackStore';
+import { useDragStateStore } from '../stores/dragStateStore';
+import { computePlacement } from '../lib/placementPolicy';
 import type { Module, ModuleType } from '../types/script';
 
 const store = useProjectStore();
 const timeline = useTimelineStore();
 const playback = usePlaybackStore();
+const drag = useDragStateStore();
 
-// ── Drag reorder ──
+// ── Drag reorder with snap + collision ──
 const scrollRef = ref<HTMLDivElement | null>(null);
 let dragIdx = -1;
 
@@ -72,18 +75,53 @@ watch(() => playback.currentTime, (t) => {
 
 function onDragStart(i: number, e: DragEvent) {
   dragIdx = i;
-  e.dataTransfer?.setData('text/plain', String(i));
+  const card = (e.target as HTMLElement).closest('.timeline__card') as HTMLElement;
+  const w = card?.offsetWidth || 80;
+  drag.startDrag(timeline.modules[i].id, i, e.clientX, e.clientY, w);
+
   e.dataTransfer!.effectAllowed = 'move';
+  e.dataTransfer?.setData('text/plain', String(i));
 }
-function onDragOver(toIdx: number, _e: DragEvent) {
+
+function onDragOver(toIdx: number, e: DragEvent) {
   if (dragIdx < 0 || dragIdx === toIdx) return;
-  const mods = [...timeline.modules];
-  const [moved] = mods.splice(dragIdx, 1);
-  mods.splice(toIdx, 0, moved);
-  dragIdx = toIdx;
-  timeline.modules = mods;
+  drag.updatePosition(e.clientX, e.clientY);
+
+  const track = scrollRef.value;
+  if (!track) return;
+  const rect = track.getBoundingClientRect();
+  const relX = e.clientX - rect.left + track.scrollLeft;
+  const pxPerSec = track.scrollWidth / Math.max(1, store.metadata.total_duration || 60);
+
+  const slots = timeline.modules.map((m, idx) => ({
+    index: idx,
+    id: m.id,
+    startTime: m.start_time,
+    duration: m.duration,
+    isDragging: idx === dragIdx,
+  }));
+
+  const mod = timeline.modules[dragIdx];
+  const result = computePlacement(
+    relX, slots, dragIdx, mod.duration,
+    pxPerSec, store.metadata.total_duration || 60,
+  );
+
+  drag.setTarget(result.insertIndex, 0, result.startTime);
 }
-function onDragEnd() { dragIdx = -1; }
+
+function onDragEnd() {
+  const tgt = drag.targetIndex;
+  if (dragIdx >= 0 && tgt >= 0 && tgt !== dragIdx) {
+    const mods = [...timeline.modules];
+    const [moved] = mods.splice(dragIdx, 1);
+    moved.start_time = drag.ghostTime;
+    mods.splice(tgt, 0, moved);
+    timeline.modules = mods;
+  }
+  drag.endDrag();
+  dragIdx = -1;
+}
 
 const typeLabel = (t: ModuleType): string => {
   const m: Record<ModuleType, string> = {
