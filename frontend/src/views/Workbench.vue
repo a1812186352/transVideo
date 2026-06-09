@@ -67,10 +67,7 @@
 
     <!-- ═══ Timeline (bottom) ═══ -->
     <footer class="zone zone--timeline">
-      <div class="zone__body" style="flex-direction: row;">
-        <div style="flex: 1; min-width: 0;"><TimelineBar /></div>
-        <div style="width: 280px; flex-shrink: 0; border-left: 1px solid var(--border);"><PreviewPlayer /></div>
-      </div>
+      <div class="zone__body"><TimelineBar /></div>
     </footer>
 
     <!-- ═══ Settings modal (kept here, rendered by workbench store) ═══ -->
@@ -100,7 +97,6 @@ import PreviewPanel from '../components/PreviewPanel.vue';
 import PropertyPanel from '../components/PropertyPanel.vue';
 import GeneratePanel from '../components/GeneratePanel.vue';
 import TimelineBar from '../components/TimelineBar.vue';
-import PreviewPlayer from '../components/PreviewPlayer.vue';
 import ApiSettingsPanelStatic from '../components/ApiSettingsPanelStatic.vue';
 
 const project = useProjectStore();
@@ -263,7 +259,6 @@ function onPreviewUpload(file: File) {
 
 /* ── Timeline body ── */
 .zone--timeline .zone__body {
-  flex-direction: column;
   height: 100%;
   overflow: hidden;
 }
