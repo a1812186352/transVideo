@@ -9,6 +9,13 @@
       </select>
     </div>
 
+    <!-- ═══ Text replacer toggle ═══ -->
+    <div class="prop-analyze" v-if="store.videoId">
+      <button class="prop-repl-btn" @click="showTextReplacer = !showTextReplacer">
+        🔤 批量替换文本
+      </button>
+    </div>
+
     <!-- ═══ Analyze button ═══ -->
     <div class="prop-analyze" v-if="store.videoId">
       <button
@@ -130,20 +137,30 @@
       <span>选择模块查看详情</span>
     </div>
   </div>
+
+    <!-- ═══ Text Replacer overlay ═══ -->
+    <Teleport to="body">
+      <div v-if="showTextReplacer" class="prop-overlay" @click.self="showTextReplacer = false">
+        <TextReplacer @close="showTextReplacer = false" />
+      </div>
+    </Teleport>
 </template>
 
 <script setup lang="ts">
-import { computed, reactive } from 'vue';
+import { computed, reactive, ref } from 'vue';
 import { useProjectStore } from '../stores/project';
 import { useTimelineStore } from '../stores/timelineStore';
 import { usePlaybackStore } from '../stores/playbackStore';
 import { useWorkbenchStore } from '../stores/workbench';
+import TextReplacer from "./TextReplacer.vue";
 import AudioWaveform from './AudioWaveform.vue';
 
 const store = useProjectStore();
 const timeline = useTimelineStore();
 const playback = usePlaybackStore();
 const ws = useWorkbenchStore();
+
+const showTextReplacer = ref(false);
 
 const groups = reactive({
   scene: true, visual: true, color: true, audio: true, text: true,
@@ -364,6 +381,17 @@ const energyBars = computed(() => {
 }
 .badge--large { background: var(--accent-subtle); color: var(--accent); font-weight: 600; }
 .badge--small { opacity: 0.6; }
+
+.prop-repl-btn {
+  width: 100%; padding: 5px 0; border: 1px solid var(--border); border-radius: var(--radius-sm);
+  background: var(--bg-surface); color: var(--text-secondary); font-size: 11px;
+  cursor: pointer; transition: all var(--transition);
+}
+.prop-repl-btn:hover { border-color: var(--accent); color: var(--accent); }
+.prop-overlay {
+  position: fixed; inset: 0; z-index: 2000;
+  background: rgba(0,0,0,0.45); display: flex; align-items: center; justify-content: center;
+}
 
 .prop-empty { font-size: 11px; color: var(--text-muted); }
 </style>

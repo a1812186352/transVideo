@@ -6,9 +6,9 @@
         v-for="t in tabs"
         :key="t.key"
         class="mat-tab"
-        :class="{ 'mat-tab--active': activeTab === t.key }"
+        :class="{ 'mat-tab--active': activeTab === t.key, 'mat-tab--alert': t.key === 'validator' && issueCount > 0 }"
         @click="activeTab = t.key"
-      >{{ t.label }}</button>
+      >{{ t.label }}<span v-if="t.key === 'validator' && issueCount" class="mat-tab__badge">{{ issueCount }}</span></button>
     </div>
 
     <!-- ═══ Tab: 素材 ═══ -->
@@ -88,6 +88,11 @@
       </div>
       <div v-if="!templates.length" class="mat-empty mat-empty--small">暂无模板</div>
     </div>
+
+    <!-- ═══ Tab: 校验 ═══ -->
+    <div v-show="activeTab === 'validator'" class="mat-content">
+      <MaterialValidator />
+    </div>
   </div>
 </template>
 
@@ -96,6 +101,7 @@ import { ref, computed, onMounted, reactive } from 'vue';
 import { useProjectStore } from '../stores/project';
 import { useTimelineStore } from '../stores/timelineStore';
 import { usePlaybackStore } from '../stores/playbackStore';
+import MaterialValidator from './MaterialValidator.vue';
 
 const store = useProjectStore();
 const timeline = useTimelineStore();
@@ -106,8 +112,18 @@ const tabs = [
   { key: 'materials', label: '素材' },
   { key: 'script',    label: '脚本' },
   { key: 'templates', label: '模板' },
+  { key: 'validator', label: '校验' },
 ];
 const activeTab = ref('materials');
+
+// Issues: count modules with empty or suspicious source paths
+const issueCount = computed(() =>
+  timeline.modules.filter(m => {
+    const src = (m as any).source;
+    const path = (typeof src?.path === 'string') ? src.path.trim() : '';
+    return !path;
+  }).length
+);
 
 // ── Script tab ──
 const scriptText = computed(() => {
@@ -220,6 +236,28 @@ function onDragStart(id: string, e: DragEvent) {
 .mat-tab--active {
   color: var(--accent);
   border-bottom-color: var(--accent);
+}
+.mat-tab--alert {
+  color: #da3633;
+}
+.mat-tab--alert.mat-tab--active {
+  color: #da3633;
+  border-bottom-color: #da3633;
+}
+.mat-tab__badge {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 16px;
+  height: 16px;
+  margin-left: 4px;
+  padding: 0 4px;
+  border-radius: 8px;
+  background: #da3633;
+  color: #fff;
+  font-size: 9px;
+  font-weight: 700;
+  line-height: 1;
 }
 .mat-tab:hover {
   color: var(--text-secondary);
