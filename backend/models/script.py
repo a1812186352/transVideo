@@ -43,6 +43,7 @@ class Module(BaseModel):
     track_index: int = Field(ge=0)
     source: Optional[SourceMaterial] = None
     params: Optional[ModuleParams] = None
+    extra_params: Optional[Dict[str, Any]] = None
     children: List["Module"] = []
     detail: Optional[Dict[str, Any]] = None
 

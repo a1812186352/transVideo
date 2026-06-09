@@ -63,13 +63,7 @@
 
     <!-- ═══ Tab: 脚本 ═══ -->
     <div v-show="activeTab === 'script'" class="mat-content">
-      <textarea
-        class="mat-script"
-        :value="scriptText"
-        @input="onScriptEdit"
-        placeholder="在此编辑脚本内容…"
-        spellcheck="false"
-      />
+      <ScriptPanel />
     </div>
 
     <!-- ═══ Tab: 模板 ═══ -->
@@ -102,6 +96,7 @@ import { useProjectStore } from '../stores/project';
 import { useTimelineStore } from '../stores/timelineStore';
 import { usePlaybackStore } from '../stores/playbackStore';
 import MaterialValidator from './MaterialValidator.vue';
+import ScriptPanel from './ScriptPanel.vue';
 
 const store = useProjectStore();
 const timeline = useTimelineStore();
@@ -124,16 +119,6 @@ const issueCount = computed(() =>
     return !path;
   }).length
 );
-
-// ── Script tab ──
-const scriptText = computed(() => {
-  // Build script text from store modules
-  return timeline.modules.map(m => `${m.label || ''}: ${m.params?.text_content || ''}`).join('\n\n');
-});
-function onScriptEdit(e: Event) {
-  const val = (e.target as HTMLTextAreaElement).value;
-  // store script text back
-}
 
 // ── Templates ──
 interface Template { id: string; name: string; }

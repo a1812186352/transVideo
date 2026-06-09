@@ -2,9 +2,14 @@
 
 faster-whisper uses CTranslate2 backend — ~4× faster on CPU than openai-whisper.
 Falls back to openai-whisper if faster-whisper is not installed.
+
+First-run auto-download:  if the Whisper model is not in the local cache,
+``_load_model()`` triggers an automatic download via ``model_manager.py``
+with progress callbacks.  Network errors are caught and re-raised with a
+clear message.
 """
 
-from typing import List, Optional, Any
+from typing import List, Optional, Any, Callable
 
 # Detect available backend at import time
 _USE_FASTER = False
@@ -20,26 +25,56 @@ class AudioTranscriber:
 
     Prefers faster-whisper (CTranslate2, ~4× CPU speedup) when available.
     Falls back to openai-whisper otherwise.
+    Missing models are auto-downloaded on first load with progress reporting.
 
     Attributes:
         model_name: Whisper model size (default 'small').
         device: Compute device ('cpu' or 'cuda').
+        on_progress: Optional ``(tag, msg)`` callback for download progress.
     """
 
-    def __init__(self, model_name: str = "small", device: str = "cpu") -> None:
+    def __init__(
+        self,
+        model_name: str = "small",
+        device: str = "cpu",
+        on_progress: Optional[Callable[[str, str], None]] = None,
+    ) -> None:
         self.model_name = model_name
         self.device = device
+        self.on_progress = on_progress
         self._model: Any = None
 
+    # ── Backend name ──
+
+    @staticmethod
+    def backend() -> str:
+        return "faster" if _USE_FASTER else "openai"
+
+    # ── Model loading with auto-download ──
+
     def _load_model(self) -> Any:
-        """Lazy-load the Whisper model (faster-whisper or openai-whisper)."""
+        """Lazy-load the Whisper model, auto-downloading if necessary."""
         if self._model is not None:
             return self._model
 
+        backend = self.backend()
+
+        # Ensure model exists in cache — triggers download if missing
+        from understanding.utils.model_manager import ensure_model
+        ok, err = ensure_model(
+            model_name=self.model_name,
+            backend=backend,
+            device=self.device,
+            on_progress=self.on_progress,
+        )
+        if not ok:
+            raise RuntimeError(
+                f"Whisper {self.model_name} model unavailable and download failed: {err}"
+            )
+
         if _USE_FASTER:
             from faster_whisper import WhisperModel
-            # Map device string: "cuda" → "cuda", else "cpu"
-            compute = "int8"  # int8 quantization for CPU speed
+            compute = "int8"
             dev = "cuda" if self.device == "cuda" else "cpu"
             self._model = WhisperModel(self.model_name, device=dev, compute_type=compute)
         else:

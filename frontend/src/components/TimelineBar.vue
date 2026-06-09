@@ -2,22 +2,16 @@
   <div class="timeline">
     <div class="timeline__header">时间轴 · 模块编排</div>
     <div class="timeline__track" ref="scrollRef">
-      <template v-for="(mod, i) in timeline.modules" :key="mod.id">
-        <!-- ═══ Trend marker between cards ═══ -->
-        <div v-if="i > 0" class="trend">
-          <span v-if="brightnessTrend(mod)" class="trend__icon" :title="'亮度: ' + brightnessTrend(mod)">
-            {{ brightnessTrend(mod) === '变亮' ? '☀' : '🌙' }}
-          </span>
-          <span v-if="scaleTrend(mod)" class="trend__icon" :title="'缩放: ' + scaleTrend(mod)">
-            {{ scaleTrend(mod) === '扩散' ? '↗' : '↙' }}
-          </span>
-          <span v-if="movementTrend(mod)" class="trend__bar" :class="movementTrend(mod) === '动效增强' ? 'trend__bar--up' : 'trend__bar--down'" />
+      <template v-for="(mod, i) in mergedModules" :key="mod.id">
+        <!-- ═══ Merged indicator (when module combines >1 types) ═══ -->
+        <div v-if="mod.mergedTypes.length > 1" class="merge-badge" :title="mod.mergedTypes.join(' + ')">
+          {{ mod.mergedTypes.length }}合1
         </div>
 
         <!-- ═══ Module card ═══ -->
         <div
           class="timeline__card"
-          :class="[`timeline__card--${mod.type}`, { 'timeline__card--sel': timeline.selectedModuleId === mod.id }]"
+          :class="[`timeline__card--${mod.mergedTypes[0]}`, { 'timeline__card--sel': timeline.selectedModuleId === mod.id }]"
           :style="{ flex: mod.duration || 1 }"
           draggable="true"
           @dragstart="onDragStart(i, $event)"
@@ -26,11 +20,13 @@
           @click="onCardClick(mod)"
         >
           <div class="timeline__card-top">
-            <span class="timeline__card-type">{{ typeLabel(mod.type) }}</span>
+            <span class="timeline__card-type">{{ typeLabelForMerge(mod.mergedTypes) }}</span>
             <span class="timeline__card-dur">{{ fmtDuration(mod.duration) }}</span>
           </div>
-          <div class="timeline__card-btm" v-if="motionSummary(mod as any)">
-            <span class="timeline__motion-text">{{ motionSummary(mod as any) }}</span>
+          <!-- Bottom row: original timestamps + content tags -->
+          <div class="timeline__card-btm" v-if="tsLabel(mod)">
+            <span class="timeline__ts">{{ tsLabel(mod) }}</span>
+            <span class="timeline__tags" v-if="contentTags(mod)">{{ contentTags(mod) }}</span>
           </div>
         </div>
       </template>
@@ -50,18 +46,24 @@ import { useTimelineStore } from '../stores/timelineStore';
 import { usePlaybackStore } from '../stores/playbackStore';
 import { useDragStateStore } from '../stores/dragStateStore';
 import { computePlacement } from '../lib/placementPolicy';
-import type { Module, ModuleType } from '../types/script';
+import { useModuleMerge, mergedTypeLabel, type MergedModule } from '../composables/useModuleMerge';
+import type { ModuleType } from '../types/script';
 
 const store = useProjectStore();
 const timeline = useTimelineStore();
 const playback = usePlaybackStore();
 const drag = useDragStateStore();
 
+// ── Merged module list (computed layer, original modules unchanged) ──
+const mergedModules = useModuleMerge(timeline.modules as any);
+const typeLabelForMerge = (types: ModuleType[]): string => mergedTypeLabel(types);
+
 // ── Drag reorder with snap + collision ──
 const scrollRef = ref<HTMLDivElement | null>(null);
 let dragIdx = -1;
 
-function onCardClick(mod: Module) {
+function onCardClick(mod: MergedModule) {
+  // Select the primary module
   timeline.selectModule(mod.id);
   playback.seekTo(mod.start_time);
 }
@@ -142,48 +144,36 @@ const progressPct = computed(() => {
 });
 
 /* ═══════════════════════════════════
-   Motion trend helpers
+   Card bottom-row helpers
    ═══════════════════════════════════ */
-// Read the PREVIOUS module's detail for the gap between module[i-1] and module[i]
-function detailOf(mod: any): any {
-  return mod?.detail || mod?.analysis || mod?.params || null;
+const detailOf = (mod: any): any => mod?.detail || mod?.analysis || mod?.params || null;
+
+/** Original video timestamp label (HH:MM:SS → HH:MM:SS) */
+function tsLabel(mod: any): string | null {
+  const d = detailOf(mod);
+  const oStart = d?.original_start;
+  const oEnd = d?.original_end;
+  if (oStart == null && oEnd == null) return null;
+  const s = oStart != null ? fmtHMS(oStart) : '—';
+  const e = oEnd != null ? fmtHMS(oEnd) : '—';
+  return `${s} → ${e}`;
 }
 
-function brightnessTrend(mod: any): string | null {
+/** Content tags from the dual-layer classification */
+function contentTags(mod: any): string | null {
   const d = detailOf(mod);
-  const mt = d?.motion_trend;
-  return mt?.brightness_trend || null;
-}
-function scaleTrend(mod: any): string | null {
-  const d = detailOf(mod);
-  const mt = d?.motion_trend;
-  return mt?.scale_trend || null;
-}
-function movementTrend(mod: any): string | null {
-  const d = detailOf(mod);
-  const mt = d?.motion_trend;
-  return mt?.movement_trend || null;
+  const tags = d?.content_tags;
+  if (!tags || !Array.isArray(tags) || !tags.length) return null;
+  return tags.slice(0, 3).join(' · ');
 }
 
-function motionSummary(mod: any): string | null {
-  const d = detailOf(mod);
-  const parts: string[] = [];
-  const md = d?.motion_description;
-  if (md?.label) parts.push(md.label);
-  for (const k of ['brightness_trend', 'scale_trend', 'movement_trend']) {
-    const v = d?.motion_trend?.[k];
-    if (!v) continue;
-    if (k === 'brightness_trend') parts.push('亮度' + (v === '变亮' ? '↑' : '↓'));
-    else if (k === 'scale_trend') parts.push(v);
-    else if (k === 'movement_trend') parts.push(v);
-  }
-  // object_transitions as dict
-  const ot = d?.object_transitions;
-  if (ot) {
-    if (ot.fade_in_count > 0) parts.push(`物体淡入×${ot.fade_in_count}`);
-    if (ot.fade_out_count > 0) parts.push(`物体淡出×${ot.fade_out_count}`);
-  }
-  return parts.length ? parts.join(' + ') : null;
+function fmtHMS(s: number): string {
+  if (!s || s <= 0) return '0:00';
+  const h = Math.floor(s / 3600);
+  const m = Math.floor((s % 3600) / 60);
+  const sec = Math.floor(s % 60);
+  const pad = (n: number) => String(n).padStart(2, '0');
+  return h > 0 ? `${h}:${pad(m)}:${pad(sec)}` : `${m}:${pad(sec)}`;
 }
 </script>
 
@@ -211,40 +201,6 @@ function motionSummary(mod: any): string | null {
   scrollbar-color: var(--border) transparent;
 }
 
-/* ── Trend marker between cards ── */
-.trend {
-  display: flex;
-  align-items: center;
-  gap: 2px;
-  flex-shrink: 0;
-  padding: 0 2px;
-  height: 100%;
-}
-.trend__icon {
-  font-size: 9px;
-  line-height: 1;
-  opacity: 0.5;
-  transition: opacity var(--transition);
-}
-.trend:hover .trend__icon {
-  opacity: 1;
-}
-.trend__bar {
-  width: 3px;
-  height: 24px;
-  border-radius: 2px;
-  flex-shrink: 0;
-  transition: opacity var(--transition);
-}
-.trend__bar--up {
-  background: linear-gradient(to top, var(--accent) 0%, transparent 100%);
-  opacity: 0.4;
-}
-.trend__bar--down {
-  background: linear-gradient(to bottom, var(--accent) 0%, transparent 100%);
-  opacity: 0.4;
-}
-
 /* ── Module card ── */
 .timeline__card {
   border-radius: var(--radius-sm);
@@ -270,6 +226,14 @@ function motionSummary(mod: any): string | null {
 .timeline__card--effect      { border-left: 3px solid #8b5cf6; }
 .timeline__card--video_segment { border-left: 3px solid #ef4444; }
 
+/* ── Merge badge between cards ── */
+.merge-badge {
+  font-size: 8px; padding: 1px 4px; border-radius: 3px;
+  background: var(--accent-subtle); color: var(--accent);
+  flex-shrink: 0; white-space: nowrap; margin: 0 2px;
+  font-weight: 500;
+}
+
 /* ── Card top row (type + dur) ── */
 .timeline__card-top {
   display: flex;
@@ -284,17 +248,27 @@ function motionSummary(mod: any): string | null {
   font-size: 10px; color: var(--text-muted);
 }
 
-/* ── Card bottom row (motion summary) ── */
+/* ── Card bottom row (timestamps + tags) ── */
 .timeline__card-btm {
+  display: flex;
+  align-items: center;
   overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
   max-width: 100%;
 }
-.timeline__motion-text {
+.timeline__ts {
   font-size: 9px;
+  color: var(--text-muted);
+  font-family: var(--font-mono);
+  white-space: nowrap;
+}
+.timeline__tags {
+  font-size: 8px;
   color: var(--accent);
   opacity: 0.8;
+  margin-left: 6px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 
 /* ── Progress bar ── */

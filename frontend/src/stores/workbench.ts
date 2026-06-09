@@ -22,6 +22,7 @@ export const useWorkbenchStore = defineStore('workbench', () => {
   const exportDownloadUrl = ref<string | null>(null);
   const uploadFileSize = ref(0);
   const uploadFileName = ref('');
+  const exportProgress = ref(0);
   const videoCurrentTime = ref(0);
   const analysisActualTime = ref('');
   const viewMode = ref<'list' | 'grid'>('list');
@@ -454,26 +455,92 @@ export const useWorkbenchStore = defineStore('workbench', () => {
       });
       if (!res.ok) throw new Error(`导出请求失败: HTTP ${res.status}`);
 
-      for (let i = 0; i < 600; i++) {
-        await sleep(2000);
-        const pollRes = await fetch(`${base}/export/${project.videoId}`);
-        if (!pollRes.ok) throw new Error(`轮询失败: HTTP ${pollRes.status}`);
-
-        const result: ExportResult = await pollRes.json();
-        if (result.status === 'completed') {
-          project.setExportStatus('completed');
-          if (result.output_path) {
-            exportDownloadUrl.value = `${base}${result.output_path}`;
+      // ── SSE: listen for progress and completion events ──
+      const sseUrl = `${base}/export/${project.videoId}/progress`;
+      const { SseClient } = await import('../utils/sseConnection');
+      const sseClient = new SseClient({
+        url: sseUrl,
+        onMessage: (data: any) => {
+          if (Array.isArray(data) && data.length >= 2) {
+            const [pct, _stage, _eta] = data;
+            exportProgress.value = Math.min(99, pct);
           }
-          return;
-        }
-        if (result.status === 'failed') throw new Error(result.error ?? '导出失败');
-      }
-      throw new Error('导出超时');
+        },
+        onStateChange: (state) => {
+          if (state === 'disconnected') {
+            startPollFallback(base);
+          }
+        },
+        pollInterval: 2000,
+        pollFn: async () => {
+          await pollExportStatus(base);
+        },
+      });
+
+      // Wait for completion via two-phase: SSE done || poll fallback done
+      await pollExportCompletion(base, sseClient);
+      sseClient.destroy();
     } catch (err: any) {
       project.setExportStatus('failed');
       project.setError(err.message ?? '导出失败');
     }
+  }
+
+  /** Shared helper: check export status from REST endpoint */
+  let _exportResolve: ((ok: boolean) => void) | null = null;
+
+  async function pollExportStatus(base: string): Promise<boolean> {
+    try {
+      const res = await fetch(`${base}/export/${project.videoId}`);
+      if (!res.ok) return false;
+      const result: ExportResult = await res.json();
+      if (result.status === 'completed') {
+        project.setExportStatus('completed');
+        exportProgress.value = 100;
+        if (result.output_path) exportDownloadUrl.value = `${base}${result.output_path}`;
+        _exportResolve?.(true);
+        return true;
+      }
+      if (result.status === 'failed') {
+        throw new Error(result.error ?? '导出失败');
+      }
+      return false;
+    } catch { return false; }
+  }
+
+  async function pollExportCompletion(base: string, sseClient: any): Promise<void> {
+    return new Promise((resolve, reject) => {
+      // Timeout: 20 minutes
+      const timeout = setTimeout(() => reject(new Error('导出超时')), 20 * 60 * 1000);
+      _exportResolve = (ok: boolean) => {
+        clearTimeout(timeout);
+        _exportResolve = null;
+        if (ok) resolve(); else reject(new Error('导出失败'));
+      };
+      // Also keep polling in case SSE drops
+      const iv = setInterval(async () => {
+        try {
+          const done = await pollExportStatus(base);
+          if (done) { clearInterval(iv); return; }
+        } catch { /* keep polling */ }
+      }, 3000);
+
+      // Cleanup if SSE completes via other path
+      setTimeout(() => clearInterval(iv), 20 * 60 * 1000);
+    });
+  }
+
+  /** Fallback polling starter when SSE fails */
+  let _fallbackTimer: ReturnType<typeof setInterval> | null = null;
+  function startPollFallback(base: string) {
+    if (_fallbackTimer) return;
+    _fallbackTimer = setInterval(async () => {
+      if (project.exportStatus === 'completed' || project.exportStatus === 'failed') {
+        if (_fallbackTimer) { clearInterval(_fallbackTimer); _fallbackTimer = null; }
+        return;
+      }
+      await pollExportStatus(base);
+    }, 2000);
   }
 
   /* ═══════════════════════════════════
@@ -571,7 +638,7 @@ export const useWorkbenchStore = defineStore('workbench', () => {
     // Analyze
     handleAnalyze,
     // Export
-    handleExport,
+    exportProgress, handleExport,
     // Shots
     onShotsChange,
     // Formatting

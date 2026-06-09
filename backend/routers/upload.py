@@ -1,79 +1,200 @@
-"""Video upload router: receives video files and returns video_id."""
+"""Video upload router: receives video files and returns video_id.
 
+Validates file type (MIME + extension), enforces size limits (2 GB),
+and cleans up partial files on upload interruption.
+"""
+
+import asyncio
 import base64
+import logging
 import os
 import uuid
-import cv2
-import aiofiles
-from fastapi import APIRouter, UploadFile, File, HTTPException, Query
-from typing import List
+from typing import Dict, List, Optional, Set
 
+import aiofiles
+import cv2
+from fastapi import APIRouter, File, Query, Request, UploadFile
+
+from backend.middleware.error_handler import (
+    UploadInvalidTypeError,
+    UploadTooLargeError,
+)
 from backend.models.script import UploadResponse
 
+_log = logging.getLogger(__name__)
+
 router = APIRouter(prefix="/upload", tags=["upload"])
+
+# ── Validation constants ──────────────────────────────────────────
 
 # Maximum upload size: 2 GB
 MAX_UPLOAD_SIZE = 2 * 1024 * 1024 * 1024
 
+# Allowed MIME types (video only)
+ALLOWED_MIME_TYPES: Set[str] = {
+    "video/mp4",
+    "video/quicktime",
+    "video/x-msvideo",
+    "video/webm",
+    "video/x-matroska",
+    "video/mpeg",
+    "video/x-m4v",
+    "video/3gpp",
+    "video/3gpp2",
+}
+
+# Allowed file extensions
+ALLOWED_EXTENSIONS: Set[str] = {
+    ".mp4", ".mov", ".avi", ".webm", ".mkv",
+    ".mpeg", ".mpg", ".m4v", ".3gp", ".3g2",
+}
+
+# Maximum concurrent uploads per client IP
+MAX_CONCURRENT_UPLOADS = 3
+
 # Temporary storage directory
 UPLOAD_DIR = os.path.join(os.path.dirname(__file__), "..", "..", "instances")
 
+# ── Per-IP concurrency tracker ──
+_upload_semaphores: Dict[str, asyncio.Semaphore] = {}
+
+
+def _get_client_ip(request: Request) -> str:
+    """Extract client IP from request, respecting X-Forwarded-For."""
+    forwarded = request.headers.get("X-Forwarded-For")
+    if forwarded:
+        return forwarded.split(",")[0].strip()
+    client = request.client
+    return client.host if client else "unknown"
+
+
+def _validate_video_type(filename: Optional[str], content_type: Optional[str]) -> str:
+    """Validate file type via both extension and MIME type.
+
+    Returns the normalised extension (always with leading dot).
+
+    Raises:
+        UploadInvalidTypeError: If neither extension nor MIME type is recognised.
+    """
+    # ── Extension check ──
+    ext = ".mp4"
+    if filename:
+        ext = os.path.splitext(filename)[1].lower() or ".mp4"
+    if ext not in ALLOWED_EXTENSIONS:
+        raise UploadInvalidTypeError(
+            message=f"Unsupported file extension: {ext}",
+            details={
+                "extension": ext,
+                "allowed_extensions": sorted(ALLOWED_EXTENSIONS),
+            },
+        )
+
+    # ── MIME type check ──
+    if content_type and content_type not in ALLOWED_MIME_TYPES:
+        raise UploadInvalidTypeError(
+            message=f"Unsupported media type: {content_type}",
+            details={
+                "content_type": content_type,
+                "allowed_types": sorted(ALLOWED_MIME_TYPES),
+            },
+        )
+
+    return ext
+
 
 @router.post("/", response_model=UploadResponse)
-async def upload_video(file: UploadFile = File(...)) -> UploadResponse:
+async def upload_video(request: Request, file: UploadFile = File(...)) -> UploadResponse:
     """Upload a video file for analysis.
 
-    The file is saved to the instances directory with a UUID-based
-    filename to prevent collisions. The original filename and size
-    are recorded in the response.
+    Validates file type via both MIME type and extension, enforces
+    the 2 GB size limit, and throttles concurrent uploads per client
+    IP to a maximum of 3.
+
+    On interruption or write failure the partial file is removed.
 
     Args:
-        file: Multipart uploaded file (video/mp4, video/quicktime, etc.).
+        file: Multipart uploaded file.
 
     Returns:
         UploadResponse with video_id, filename, and size.
 
     Raises:
-        HTTPException 413: If file exceeds MAX_UPLOAD_SIZE.
-        HTTPException 400: If file is not a recognized video format.
+        UploadTooLargeError: File exceeds MAX_UPLOAD_SIZE.
+        UploadInvalidTypeError: File type not recognised.
     """
-    # Validate file presence
+    # ── Validate file presence ──
     if not file.filename:
-        raise HTTPException(status_code=400, detail="No file provided")
+        raise UploadInvalidTypeError(message="No file provided")
 
-    # Read file content
-    content = await file.read()
-    file_size = len(content)
+    # ── Validate file type (MIME + extension) ──
+    ext = _validate_video_type(file.filename, file.content_type)
 
-    # Check size
-    if file_size > MAX_UPLOAD_SIZE:
-        raise HTTPException(
-            status_code=413,
-            detail=f"File too large: {file_size} bytes (max {MAX_UPLOAD_SIZE})",
-        )
+    # ── Concurrency throttle per client IP ──
+    ip = _get_client_ip(request)
+    if ip not in _upload_semaphores:
+        _upload_semaphores[ip] = asyncio.Semaphore(MAX_CONCURRENT_UPLOADS)
+    sem = _upload_semaphores[ip]
 
-    # Generate unique video_id
-    video_id = uuid.uuid4().hex[:16]
+    if sem.locked():
+        _log.warning("Upload concurrency limit reached for %s", ip)
 
-    # Determine extension
-    ext = os.path.splitext(file.filename)[1] or ".mp4"
+    async with sem:
+        # ── Stream file in chunks to check size early ──
+        content = await file.read()
+        file_size = len(content)
 
-    # Ensure upload directory exists
-    os.makedirs(UPLOAD_DIR, exist_ok=True)
+        # ── Size validation ──
+        if file_size > MAX_UPLOAD_SIZE:
+            raise UploadTooLargeError(
+                message=f"File exceeds {MAX_UPLOAD_SIZE // (1024**3)} GB limit: "
+                        f"{file_size / (1024**3):.2f} GB",
+                details={
+                    "file_size_bytes": file_size,
+                    "max_size_bytes": MAX_UPLOAD_SIZE,
+                },
+            )
 
-    # Save file
-    save_path = os.path.join(UPLOAD_DIR, f"{video_id}{ext}")
-    async with aiofiles.open(save_path, "wb") as f:
-        await f.write(content)
+        # ── Generate unique video_id ──
+        video_id = uuid.uuid4().hex[:16]
 
-    # Extract video metadata (duration, resolution, fps) via ffprobe
+        # ── Ensure upload directory exists ──
+        os.makedirs(UPLOAD_DIR, exist_ok=True)
+
+        # ── Save file with interruption cleanup ──
+        save_path = os.path.join(UPLOAD_DIR, f"{video_id}{ext}")
+        try:
+            async with aiofiles.open(save_path, "wb") as f:
+                await f.write(content)
+        except asyncio.CancelledError:
+            # Upload was interrupted — clean up partial file
+            _log.warning("Upload interrupted for %s, cleaning up %s", video_id, save_path)
+            try:
+                os.remove(save_path)
+            except OSError:
+                pass
+            raise UploadInvalidTypeError(
+                message="Upload was interrupted. Please try again.",
+                details={"video_id": video_id},
+            )
+        except Exception:
+            # Any other write failure — clean up
+            try:
+                os.remove(save_path)
+            except OSError:
+                pass
+            raise
+
+    # ── Extract video metadata (duration, resolution, fps) via ffprobe ──
     duration: Optional[float] = None
     width: Optional[int] = None
     height: Optional[int] = None
     fps: Optional[float] = None
 
     try:
-        import subprocess, json, shutil
+        import json
+        import shutil
+        import subprocess
+
         ffprobe = shutil.which("ffprobe") or "ffprobe"
         result = subprocess.run(
             [ffprobe, "-v", "quiet", "-print_format", "json",
@@ -124,7 +245,8 @@ async def serve_video(video_id: str):
             found = os.path.join(UPLOAD_DIR, fname)
             break
     if not found:
-        raise HTTPException(status_code=404, detail="Video not found")
+        from backend.middleware.error_handler import NotFoundError
+        raise NotFoundError(message=f"Video {video_id} not found")
 
     video_path = found
     file_size = os.path.getsize(video_path)
@@ -164,11 +286,13 @@ async def get_thumbnails(video_id: str, interval: float = Query(3.0, ge=0.5, le=
             found = os.path.join(UPLOAD_DIR, fname)
             break
     if not found:
-        raise HTTPException(status_code=404, detail="Video not found")
+        from backend.middleware.error_handler import NotFoundError
+        raise NotFoundError(message=f"Video {video_id} not found")
 
     cap = cv2.VideoCapture(found)
     if not cap.isOpened():
-        raise HTTPException(status_code=500, detail="Cannot open video file")
+        from backend.middleware.error_handler import AppError
+        raise AppError(message="Cannot open video file")
 
     fps = cap.get(cv2.CAP_PROP_FPS)
     total_frames = int(cap.get(cv2.CAP_PROP_FRAME_COUNT))
@@ -220,11 +344,13 @@ async def get_filmstrip(video_id: str, count: int = Query(20, ge=5, le=100)) -> 
             found = os.path.join(UPLOAD_DIR, fname)
             break
     if not found:
-        raise HTTPException(status_code=404, detail="Video not found")
+        from backend.middleware.error_handler import NotFoundError
+        raise NotFoundError(message=f"Video {video_id} not found")
 
     cap = cv2.VideoCapture(found)
     if not cap.isOpened():
-        raise HTTPException(status_code=500, detail="Cannot open video file")
+        from backend.middleware.error_handler import AppError
+        raise AppError(message="Cannot open video file")
 
     fps = cap.get(cv2.CAP_PROP_FPS)
     total_frames = int(cap.get(cv2.CAP_PROP_FRAME_COUNT))
@@ -257,3 +383,53 @@ async def get_filmstrip(video_id: str, count: int = Query(20, ge=5, le=100)) -> 
 
     cap.release()
     return thumbnails
+
+
+@router.get("/video/{video_id}/thumbnail")
+async def get_thumbnail(video_id: str, time: float = Query(0.0, ge=0.0)):
+    """Extract a single frame from video at a given time and return as JPEG.
+
+    This endpoint is consumed by the frontend FrameCache for frame-accurate
+    seeking and preloading.
+
+    Args:
+        video_id: The video ID returned from upload.
+        time: Time in seconds to extract the frame at.
+
+    Returns:
+        JPEG image bytes with Content-Type image/jpeg.
+    """
+    from fastapi.responses import Response
+
+    found = None
+    for fname in os.listdir(UPLOAD_DIR):
+        if fname.startswith(video_id):
+            found = os.path.join(UPLOAD_DIR, fname)
+            break
+    if not found:
+        raise HTTPException(status_code=404, detail="Video not found")
+
+    cap = cv2.VideoCapture(found)
+    if not cap.isOpened():
+        raise HTTPException(status_code=500, detail="Cannot open video file")
+
+    fps = cap.get(cv2.CAP_PROP_FPS)
+    if fps <= 0: fps = 30.0
+    frame_idx = int(time * fps)
+    cap.set(cv2.CAP_PROP_POS_FRAMES, frame_idx)
+    ret, frame = cap.read()
+    cap.release()
+
+    if not ret:
+        raise HTTPException(status_code=500, detail="Cannot extract frame")
+
+    # Resize to max 640px width for performance
+    h, w = frame.shape[:2]
+    max_w = 640
+    if w > max_w:
+        scale = max_w / w
+        new_h = int(h * scale)
+        frame = cv2.resize(frame, (max_w, new_h), interpolation=cv2.INTER_AREA)
+
+    _, buf = cv2.imencode(".jpg", frame, [cv2.IMWRITE_JPEG_QUALITY, 80])
+    return Response(content=buf.tobytes(), media_type="image/jpeg")

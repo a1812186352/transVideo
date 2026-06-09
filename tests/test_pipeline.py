@@ -2,10 +2,13 @@
 
 Verifies that a real video uploaded via the FastAPI client produces
 a completed job_store JSON with valid modules.
+
+Uses the shared ``client`` fixture from ``conftest.py``.
 """
 
 import json
 import os
+import time
 from pathlib import Path
 
 import pytest
@@ -17,13 +20,7 @@ import sys
 if str(_project_root) not in sys.path:
     sys.path.insert(0, str(_project_root))
 
-from backend.main import app
 from backend.store import JobStore
-
-
-@pytest.fixture(scope="module")
-def client() -> TestClient:
-    return TestClient(app)
 
 
 def test_upload_returns_video_id(client: TestClient, test_video_path: str):

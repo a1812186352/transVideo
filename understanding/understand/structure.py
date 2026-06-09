@@ -486,17 +486,23 @@ class StructureInferrer:
         }
 
     @staticmethod
+    @staticmethod
     def _merge_adjacent(segments: List[dict]) -> List[dict]:
+        """Merge adjacent same-type segments.
+
+        Highlight segments use a tighter gap (0.8s) to preserve
+        multiple discrete climax points; other types use 1.5s.
+        """
         if not segments:
             return []
         merged = [segments[0].copy()]
         for seg in segments[1:]:
             prev = merged[-1]
-            if (
-                prev["structure_type"] == seg["structure_type"]
-                and prev["structure_type"] != TYPE_UNCLASSIFIED
-                and abs(prev["end_time"] - seg["start_time"]) < 1.5
-            ):
+            same_type = prev["structure_type"] == seg["structure_type"]
+            is_unclassified = prev["structure_type"] == TYPE_UNCLASSIFIED
+            # Highlights: only merge if nearly adjacent (multiple climax points)
+            gap = 0.8 if prev["structure_type"] == TYPE_HIGHLIGHT else 1.5
+            if same_type and not is_unclassified and abs(prev["end_time"] - seg["start_time"]) < gap:
                 prev["end_time"] = seg["end_time"]
                 prev["confidence"] = max(prev["confidence"], seg["confidence"])
                 for e in seg["evidence"]:

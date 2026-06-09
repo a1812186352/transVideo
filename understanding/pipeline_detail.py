@@ -399,7 +399,54 @@ def build_detail(
         "motion_description": vf_structured.get("motion_description", {}),
         "motion_trend": motion_trend,
         "object_transitions": object_transitions,
+        # ═══ Enhanced module info ═══
+        "original_start": round(start, 2),
+        "original_end": round(end, 2),
+        "content_tags": _build_content_tags(
+            seg_type=seg_type, sub_type=sub_type,
+            scene_tags=scene_tags, motion=motion,
+            bgm_type=bgm_type, color_tone=color_tone,
+        ),
     }
+
+
+def _build_content_tags(
+    seg_type: str,
+    sub_type: str,
+    scene_tags: List[str],
+    motion: str,
+    bgm_type: str,
+    color_tone: str,
+) -> List[str]:
+    """Build content-level tags for dual-layer classification.
+
+    Structure type (e.g. ``highlight``) describes the narrative role;
+    content tags describe the actual scene content (voiceover, effect,
+    transition, etc.).
+    """
+    tags: List[str] = []
+
+    # Scene tags from evidence
+    if scene_tags:
+        tags.extend(t for t in scene_tags if t)
+
+    # Motion label
+    if motion and motion != "无":
+        tags.append(motion)
+
+    # BGM type
+    if bgm_type and bgm_type != "无" and bgm_type != "未知":
+        tags.append(bgm_type)
+
+    # Color tone
+    if color_tone and color_tone != "未知":
+        tags.append(color_tone)
+
+    # Sub-type as content hint (if not redundant)
+    if sub_type and sub_type not in ("未分类", "无", ""):
+        tags.append(sub_type)
+
+    return list(dict.fromkeys(tags))  # dedupe preserving order
 
 
 # ── Visual description helpers ────────────────────────────────────────

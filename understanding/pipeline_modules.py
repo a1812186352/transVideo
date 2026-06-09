@@ -3,8 +3,10 @@
 Exported functions:
     build_module_tree(...)  — convert structure segments into track-aware modules
     detect_watermarks(...)  — global watermark scan across segments
+    deduplicate_modules(...) — merge redundant sibling modules
 """
 
+import json
 import uuid
 from collections import defaultdict
 from typing import Any, Dict, List, Optional, Set
@@ -157,4 +159,104 @@ def build_module_tree(
                 **base, "track_index": 0, "type": "video_segment",
             })
 
+    # ── Dedup: merge redundant video_segment + effect pairs ──
+    modules = deduplicate_modules(modules)
+
     return modules
+
+
+# ═══════════════════════════════════════════════════════════════════
+#  Module deduplication — merge same-segment video_segment + effect
+# ═══════════════════════════════════════════════════════════════════
+
+def _detail_key(detail: Optional[Dict[str, Any]]) -> str:
+    """Deterministic JSON representation of detail for equality checks."""
+    if detail is None:
+        return "null"
+    return json.dumps(detail, sort_keys=True, ensure_ascii=False, default=str)
+
+
+def deduplicate_modules(
+    modules: List[Dict[str, Any]],
+) -> List[Dict[str, Any]]:
+    """Merge redundant sibling modules that share the same segment.
+
+    When a single structure segment produces **both** a ``video_segment``
+    and an ``effect`` module at the same ``(start_time, duration)`` with
+    identical ``detail``, the effect is considered a rendering embellishment
+    of the video segment rather than a standalone module.
+
+    Merging rules
+    -------------
+    - The ``video_segment`` is kept as the primary module.
+    - The ``effect``'s ``params`` are moved into a new
+      ``extra_params`` field on the primary module.
+    - The ``effect`` module is dropped from the list.
+    - Independent effects (different time, different detail) are
+      preserved as-is.
+
+    Returns:
+        A new module list with redundant pairs merged.
+    """
+    if len(modules) < 2:
+        return modules
+
+    # ── Group modules by (start_time, duration) bucket ──
+    bucket: Dict[tuple, List[Dict[str, Any]]] = {}
+    bucket_order: List[tuple] = []  # preserve insertion order
+
+    for m in modules:
+        key = (m.get("start_time", 0.0), m.get("duration", 0.0))
+        if key not in bucket:
+            bucket[key] = []
+            bucket_order.append(key)
+        bucket[key].append(m)
+
+    # ── Process each bucket ──
+    result: List[Dict[str, Any]] = []
+
+    for key in bucket_order:
+        group = bucket[key]
+
+        if len(group) == 1:
+            result.append(group[0])
+            continue
+
+        # Collect modules by type within this time bucket
+        by_type: Dict[str, List[Dict[str, Any]]] = {}
+        for m in group:
+            t = m.get("type", "unknown")
+            by_type.setdefault(t, []).append(m)
+
+        # ── Merge: exactly one video_segment + one effect, same detail ──
+        videos = by_type.get("video_segment", [])
+        effects = by_type.get("effect", [])
+
+        merged_effect_indices: Set[int] = set()
+
+        for vi, video in enumerate(videos):
+            video_dk = _detail_key(video.get("detail"))
+            for ei, effect in enumerate(effects):
+                if ei in merged_effect_indices:
+                    continue
+                effect_dk = _detail_key(effect.get("detail"))
+                if video_dk == effect_dk:
+                    # Merge: effect params → video.extra_params
+                    eff_params = effect.get("params") or {}
+                    if eff_params:
+                        existing_extra = video.get("extra_params") or {}
+                        video["extra_params"] = {**existing_extra, **eff_params}
+                    merged_effect_indices.add(ei)
+                    break  # one effect per video_segment
+
+        # ── Emit: all video_segments, non-merged effects, other types ──
+        for m in group:
+            t = m.get("type", "unknown")
+            if t == "effect":
+                # Only emit effects that weren't merged
+                ei = effects.index(m) if m in effects else -1
+                if ei in merged_effect_indices:
+                    continue
+            result.append(m)
+
+    return result

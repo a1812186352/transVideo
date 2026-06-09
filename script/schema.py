@@ -138,6 +138,10 @@ MIGRATABLE_SCRIPT_SCHEMA: Dict[str, Any] = {
                         "transition_type": {"type": "string"},
                     },
                 },
+                "extra_params": {
+                    "type": "object",
+                    "description": "Merged params from deduplicated sibling modules (e.g. effect params folded into video_segment).",
+                },
                 "children": {
                     "type": "array",
                     "description": "Nested sub-modules.",

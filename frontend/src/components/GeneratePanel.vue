@@ -68,6 +68,17 @@
 
       <div class="gen__divider" />
 
+      <!-- ═══ Script export ═══ -->
+      <button
+        class="gen__btn gen__btn--script"
+        :disabled="timeline.modules.length === 0"
+        @click="showExporter = true"
+      >
+        📄 导出脚本
+      </button>
+
+      <div class="gen__divider" />
+
       <!-- ═══ History ═══ -->
       <div class="gen__history">
         <div class="gen__history-title">历史产出</div>
@@ -86,6 +97,11 @@
 
       <div class="gen__divider" />
 
+      <!-- ═══ Task status ═══ -->
+      <TaskEventMonitor />
+
+      <div class="gen__divider" />
+
       <!-- ═══ Monitor log ═══ -->
       <div class="gen-monitor">
         <div class="gen-monitor__title">分析日志</div>
@@ -99,6 +115,15 @@
         </div>
       </div>
     </div>
+
+    <!-- ═══ Script exporter modal ═══ -->
+    <Teleport to="body">
+      <div v-if="showExporter" class="modal-overlay" @click.self="showExporter = false">
+        <div class="modal modal--exporter">
+          <ScriptExporter @close="showExporter = false" />
+        </div>
+      </div>
+    </Teleport>
   </div>
 </template>
 
@@ -108,12 +133,15 @@ import { useProjectStore } from '../stores/project';
 import { useTimelineStore } from '../stores/timelineStore';
 import { usePlaybackStore } from '../stores/playbackStore';
 import { useWorkbenchStore } from '../stores/workbench';
+import ScriptExporter from './ScriptExporter.vue';
+import TaskEventMonitor from './TaskEventMonitor.vue';
 
 const store = useProjectStore();
 const timeline = useTimelineStore();
 const playback = usePlaybackStore();
 const ws = useWorkbenchStore();
 
+const showExporter = ref(false);
 const monitorBody = ref<HTMLDivElement | null>(null);
 
 // ── Export state (from workbench store) ──
@@ -153,13 +181,11 @@ const statusDotClass = computed(() => {
 interface HistoryItem { name: string; size: string; url?: string; }
 const history = ref<HistoryItem[]>([]);
 
-const MAX_POLL_ATTEMPTS = 600; // matches workbench handleExport loop
-
 // ── Export: delegate to workbench store ──
 function doExport() {
   ws.handleExport();
   exportProgress.value = 0;
-  let pollCount = 0;
+  // Watch SSE-driven progress from workbench store, with local fallback
   const iv = setInterval(() => {
     if (store.exportStatus === 'completed' || store.exportStatus === 'failed') {
       exportProgress.value = store.exportStatus === 'completed' ? 100 : 0;
@@ -170,10 +196,10 @@ function doExport() {
       }
       clearInterval(iv);
     } else {
-      pollCount++;
-      exportProgress.value = Math.min(95, Math.round(pollCount / MAX_POLL_ATTEMPTS * 95));
+      // Read real SSE progress from workbench store
+      exportProgress.value = Math.min(99, ws.exportProgress || exportProgress.value + 1);
     }
-  }, 2000);
+  }, 1500);
 }
 
 function downloadItem(item: HistoryItem) {
@@ -318,15 +344,23 @@ function deleteItem(item: HistoryItem) {
 .gen__btn--done:hover {
   background: #238636;
 }
-.gen__progress {
-  position: absolute;
-  left: 0;
-  top: 0;
-  bottom: 0;
-  background: var(--accent);
-  opacity: 0.15;
-  transition: width 0.5s ease;
+.gen__btn--script {
+  background: var(--bg-surface);
+  color: var(--text-primary);
+  border: 1px solid var(--border);
 }
+.gen__btn--script:hover:not(:disabled) {
+  border-color: var(--accent);
+  color: var(--accent);
+}
+
+/* ── Exporter modal ── */
+.modal--exporter {
+  max-width: 520px;
+  max-height: 80vh;
+  overflow: hidden;
+}
+
 .gen__btn-text {
   position: relative;
   z-index: 1;

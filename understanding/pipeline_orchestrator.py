@@ -11,6 +11,7 @@ Child modules:
     pipeline_config.py   — centralised thresholds
 """
 
+import logging
 import os
 import math
 import concurrent.futures
@@ -127,6 +128,10 @@ class Pipeline:
     def analyze_video(self, video_path: str, video_id: str = "", video_type: str = "vlog") -> Dict[str, Any]:
         """Run the full analysis pipeline on a video.
 
+        Each major stage is wrapped in try/except — on failure the error
+        is written to the job store (if a video_id is provided) and
+        re-raised as ``AnalysisError``.
+
         Args:
             video_path: Absolute path to the input video file.
             video_id: Optional job identifier for checkpointed resume.
@@ -138,17 +143,38 @@ class Pipeline:
 
         Raises:
             FileNotFoundError: If video_path does not exist.
+            AnalysisError: If any pipeline stage fails.
         """
+        _log = logging.getLogger(__name__)
+
         if not os.path.exists(video_path):
             raise FileNotFoundError(f"Video not found: {video_path}")
 
         if video_id:
             self._init_checkpoint(video_id)
+            if self._job_store:
+                self._job_store.set_status(video_id, "processing")
+
+        def _fail(stage: str, exc: Exception) -> None:
+            """Record error in job store and re-raise as AnalysisError."""
+            msg = f"[{stage}] {exc}"
+            _log.exception("Pipeline stage '%s' failed: %s", stage, exc)
+            if self._job_store and video_id:
+                self._job_store.set_error(video_id, msg)
+            from backend.middleware.error_handler import AnalysisError
+            raise AnalysisError(
+                message=msg,
+                details={"stage": stage, "video_id": video_id},
+            ) from exc
 
         # ── Stage 1: Signal Layer (4 parallel sub-stages) ──
-        signal_data = self._run_signal_layer(
-            video_path, self._video_id, self._job_store,
-        )
+        try:
+            signal_data = self._run_signal_layer(
+                video_path, self._video_id, self._job_store,
+            )
+        except Exception as e:
+            _fail("signal_layer", e)
+
         if self.on_progress:
             dur = signal_data.get("total_duration", 0)
             scenes = len(signal_data.get("scene_boundaries", []))
@@ -156,106 +182,121 @@ class Pipeline:
             self.on_progress("信号采集", f"完成 — 时长: {dur:.1f}s, 场景: {scenes}个, 语音段: {segs}个")
 
         # ── Stage 2: Filter Layer (keyframe sampling) ──
-        if self._is_stage_done("filter_sampler"):
-            keyframes = self._load_checkpointed("filter_sampler") or []
-            if self.on_progress:
-                self.on_progress("帧筛选", f"(恢复) {len(keyframes)} 个关键帧")
-        else:
-            if self.on_progress:
-                self.on_progress("帧筛选", "自适应采样中…")
-            keyframes = self._run_filter_layer(
-                signal_data["diff_curve"],
-                signal_data["scene_boundaries"],
-                signal_data.get("fps", 30.0),
-            )
-            if self._job_store:
-                self._save_artifact("filter_sampler", keyframes)
-            if self.on_progress:
-                self.on_progress("帧筛选", f"完成 — {len(keyframes)} 个关键帧")
+        try:
+            if self._is_stage_done("filter_sampler"):
+                keyframes = self._load_checkpointed("filter_sampler") or []
+                if self.on_progress:
+                    self.on_progress("帧筛选", f"(恢复) {len(keyframes)} 个关键帧")
+            else:
+                if self.on_progress:
+                    self.on_progress("帧筛选", "自适应采样中…")
+                keyframes = self._run_filter_layer(
+                    signal_data["diff_curve"],
+                    signal_data["scene_boundaries"],
+                    signal_data.get("fps", 30.0),
+                )
+                if self._job_store:
+                    self._save_artifact("filter_sampler", keyframes)
+                if self.on_progress:
+                    self.on_progress("帧筛选", f"完成 — {len(keyframes)} 个关键帧")
+        except Exception as e:
+            _fail("filter_layer", e)
 
         # ── Stage 2b: Content-based sampling (second channel) ──
-        # Captures informative static frames missed by diff-based sampler.
-        content_keyframes = self._run_content_sampler(
-            video_path, signal_data.get("fps", 30.0),
-            signal_data.get("total_duration", 0.0),
-        )
-        if content_keyframes:
-            # Merge: diff-based first, content supplements; dedup by frame_index
-            existing_indices = {kf["frame_index"] for kf in keyframes}
-            added = 0
-            for ckf in content_keyframes:
-                if ckf["frame_index"] not in existing_indices:
-                    keyframes.append(ckf)
-                    existing_indices.add(ckf["frame_index"])
-                    added += 1
-            # Sort by frame_index to keep timeline order
-            keyframes.sort(key=lambda kf: kf["frame_index"])
-            if self.on_progress and added > 0:
-                self.on_progress("帧筛选", f"内容采样 +{added} 静态帧 → 共 {len(keyframes)} 个关键帧")
+        try:
+            content_keyframes = self._run_content_sampler(
+                video_path, signal_data.get("fps", 30.0),
+                signal_data.get("total_duration", 0.0),
+            )
+            if content_keyframes:
+                existing_indices = {kf["frame_index"] for kf in keyframes}
+                added = 0
+                for ckf in content_keyframes:
+                    if ckf["frame_index"] not in existing_indices:
+                        keyframes.append(ckf)
+                        existing_indices.add(ckf["frame_index"])
+                        added += 1
+                keyframes.sort(key=lambda kf: kf["frame_index"])
+                if self.on_progress and added > 0:
+                    self.on_progress("帧筛选", f"内容采样 +{added} 静态帧 → 共 {len(keyframes)} 个关键帧")
+        except Exception as e:
+            _fail("content_sampler", e)
 
         # ── Stage 2.5: OCR on keyframes ──
-        if self._is_stage_done("ocr_keyframes"):
-            ocr_results = self._load_checkpointed("ocr_keyframes") or []
-            if self.on_progress:
-                self.on_progress("文字识别", f"(恢复) {len(ocr_results)} 帧")
-        else:
-            if self.on_progress:
-                self.on_progress("文字识别", "OCR 关键帧文字提取…")
-            ocr_results = self._run_ocr_on_keyframes(video_path, keyframes)
-            if self._job_store:
-                self._save_artifact("ocr_keyframes", ocr_results)
-            if self.on_progress:
-                self.on_progress("文字识别", f"完成 — {len(ocr_results)} 帧")
+        try:
+            if self._is_stage_done("ocr_keyframes"):
+                ocr_results = self._load_checkpointed("ocr_keyframes") or []
+                if self.on_progress:
+                    self.on_progress("文字识别", f"(恢复) {len(ocr_results)} 帧")
+            else:
+                if self.on_progress:
+                    self.on_progress("文字识别", "OCR 关键帧文字提取…")
+                ocr_results = self._run_ocr_on_keyframes(video_path, keyframes)
+                if self._job_store:
+                    self._save_artifact("ocr_keyframes", ocr_results)
+                if self.on_progress:
+                    self.on_progress("文字识别", f"完成 — {len(ocr_results)} 帧")
+        except Exception as e:
+            _fail("ocr", e)
 
         # ── Stage 3: Understand Layer ──
-        if self._is_stage_done("structure"):
-            structure_segments = self._load_checkpointed("structure") or []
-            if self.on_progress:
-                self.on_progress("规则引擎", f"(恢复) {len(structure_segments)} 个叙事段")
-            # Also restore visual_features into signal_data for module tree building
-            vf = self._load_checkpointed("visual_features")
-            if vf:
-                signal_data["visual_features"] = vf
-        else:
-            if self.on_progress:
-                self.on_progress("规则引擎", "结构推断 + 视觉特征分析…")
-            structure_segments = self._run_understand_layer(
-                keyframes, signal_data, ocr_results, video_path, video_type=video_type,
-            )
-            if self._job_store:
-                self._save_artifact("visual_features",
-                                    signal_data.get("visual_features", []))
-                self._save_artifact("structure", structure_segments)
-            if self.on_progress:
-                self.on_progress("规则引擎", f"完成 — {len(structure_segments)} 个叙事段")
+        try:
+            if self._is_stage_done("structure"):
+                structure_segments = self._load_checkpointed("structure") or []
+                if self.on_progress:
+                    self.on_progress("规则引擎", f"(恢复) {len(structure_segments)} 个叙事段")
+                vf = self._load_checkpointed("visual_features")
+                if vf:
+                    signal_data["visual_features"] = vf
+            else:
+                if self.on_progress:
+                    self.on_progress("规则引擎", "结构推断 + 视觉特征分析…")
+                structure_segments = self._run_understand_layer(
+                    keyframes, signal_data, ocr_results, video_path, video_type=video_type,
+                )
+                if self._job_store:
+                    self._save_artifact("visual_features",
+                                        signal_data.get("visual_features", []))
+                    self._save_artifact("structure", structure_segments)
+                if self.on_progress:
+                    self.on_progress("规则引擎", f"完成 — {len(structure_segments)} 个叙事段")
+        except Exception as e:
+            _fail("understand_layer", e)
 
         # ── Stage 4: Build Module Tree ──
-        if self._is_stage_done("script_build"):
-            module_tree = self._load_checkpointed("script_build") or []
-            if self.on_progress:
-                self.on_progress("Pipeline", f"(恢复) {len(module_tree)} 个模块")
-        else:
-            transcripts = signal_data.get("transcript_segments", [])
-            energy = signal_data.get("audio_data", {}).get("energy_curve") or signal_data.get("diff_curve", [])
-            dur_total = signal_data.get("total_duration", 0.0)
-            bpm = signal_data.get("audio_data", {}).get("bpm", 0)
-            ocr_data = ocr_results or signal_data.get("ocr_results", [])
+        try:
+            if self._is_stage_done("script_build"):
+                module_tree = self._load_checkpointed("script_build") or []
+                if self.on_progress:
+                    self.on_progress("Pipeline", f"(恢复) {len(module_tree)} 个模块")
+            else:
+                transcripts = signal_data.get("transcript_segments", [])
+                energy = signal_data.get("audio_data", {}).get("energy_curve") or signal_data.get("diff_curve", [])
+                dur_total = signal_data.get("total_duration", 0.0)
+                bpm = signal_data.get("audio_data", {}).get("bpm", 0)
+                ocr_data = ocr_results or signal_data.get("ocr_results", [])
 
-            module_tree = build_module_tree(
-                structure_segments=structure_segments,
-                transcripts=transcripts,
-                energy=energy,
-                dur_total=dur_total,
-                bpm=bpm,
-                ocr_data=ocr_data,
-                video_path=video_path,
-                visual_features=signal_data.get("visual_features"),
-                audio_data=signal_data.get("audio_data"),
-            )
-            if self._job_store:
-                self._save_artifact("script_build", module_tree)
-            if self.on_progress:
-                self.on_progress("Pipeline", f"模块树生成完成 — {len(module_tree)} 个模块")
+                module_tree = build_module_tree(
+                    structure_segments=structure_segments,
+                    transcripts=transcripts,
+                    energy=energy,
+                    dur_total=dur_total,
+                    bpm=bpm,
+                    ocr_data=ocr_data,
+                    video_path=video_path,
+                    visual_features=signal_data.get("visual_features"),
+                    audio_data=signal_data.get("audio_data"),
+                )
+                if self._job_store:
+                    self._save_artifact("script_build", module_tree)
+                if self.on_progress:
+                    self.on_progress("Pipeline", f"模块树生成完成 — {len(module_tree)} 个模块")
+        except Exception as e:
+            _fail("module_tree", e)
+
+        # Mark completed in job store
+        if self._job_store and video_id:
+            self._job_store.set_status(video_id, "completed")
 
         return assemble_result(
             signal_data=signal_data,
@@ -348,7 +389,9 @@ class Pipeline:
                     AudioTranscriber = _lazy_import(
                         "understanding.signal.audio_transcribe", "AudioTranscriber"
                     )
-                    self._transcriber = AudioTranscriber()
+                    self._transcriber = AudioTranscriber(
+                        on_progress=self.on_progress,
+                    )
                 return ("transcript", self._transcriber.transcribe(video_path))
             except Exception as e:
                 _log.warning("Audio transcription failed: %s", e)
@@ -678,6 +721,53 @@ class Pipeline:
         )
 
         return structure_segments
+
+    # ── Job recovery (process restart) ─────────────────────────────
+
+    @staticmethod
+    def recover_job(video_id: str, work_dir: str = "", video_type: str = "vlog") -> Dict[str, Any]:
+        """Resume a job after process restart.
+
+        Loads the job record from the JobStore, resolves the input
+        video path, and re-runs ``analyze_video`` — the checkpoint
+        system automatically skips already-completed stages.
+
+        Args:
+            video_id: Job identifier.
+            work_dir: Working directory (default: cwd).
+            video_type: Video type preset key.
+
+        Returns:
+            The assembled result dict.
+
+        Raises:
+            ValueError: If the job record or input file is missing.
+        """
+        from backend.store import JobStore
+
+        store = JobStore("analysis", base_dir=work_dir or os.getcwd())
+        job = store.get(video_id)
+        if job is None:
+            raise ValueError(f"Job {video_id} not found in store")
+
+        input_path = job.get("input_path", "")
+        if not input_path or not os.path.exists(input_path):
+            raise ValueError(f"Input file for job {video_id} not found: {input_path}")
+
+        pipeline = Pipeline(work_dir=os.path.dirname(input_path))
+        return pipeline.analyze_video(input_path, video_id=video_id, video_type=video_type)
+
+    @staticmethod
+    def recover_stale(work_dir: str = "") -> List[Dict[str, Any]]:
+        """Recover all stale jobs (pending/processing/queued) from the store.
+
+        Returns a list of job dicts that may need attention after a
+        process restart.
+        """
+        from backend.store import JobStore
+
+        store = JobStore("analysis", base_dir=work_dir or os.getcwd())
+        return store.list_stale()
 
     # ── ETA estimation ─────────────────────────────────────────────
 

@@ -133,7 +133,7 @@ export interface UploadResult {
 /** Export response */
 export interface ExportResult {
   video_id: string;
-  status: 'queued' | 'processing' | 'completed' | 'failed';
+  status: 'queued' | 'processing' | 'completed' | 'failed' | 'canceled';
   output_path?: string;
   error?: string;
 }

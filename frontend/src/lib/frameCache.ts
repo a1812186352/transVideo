@@ -98,7 +98,7 @@ class FrameCache {
     if (this.pending.has(time)) return;
     this.pending.add(time);
     try {
-      const url = `${this.baseUrl}/video/${this.videoId}/thumbnail?time=${time.toFixed(2)}`;
+      const url = `${this.baseUrl}/upload/video/${this.videoId}/thumbnail?time=${time.toFixed(2)}`;
       const resp = await fetch(url);
       if (!resp.ok) return;
       const blob = await resp.blob();
