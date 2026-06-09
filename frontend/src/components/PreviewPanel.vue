@@ -68,6 +68,7 @@ import { ref, computed, watch, nextTick } from 'vue';
 import { useProjectStore } from '../stores/project';
 import { useTimelineStore } from '../stores/timelineStore';
 import { usePlaybackStore } from '../stores/playbackStore';
+import { frameCache } from '../lib/frameCache';
 import { useWorkbenchStore } from '../stores/workbench';
 
 const store = useProjectStore();
@@ -112,8 +113,16 @@ interface Thumb { time: number; src: string; }
 const thumbnails = ref<Thumb[]>([]);
 
 watch(videoId, async (id) => {
-  if (!id) { thumbnails.value = []; return; }
-  // 等下一个 tick，确保 setMetadata 已完成
+  if (!id) {
+    thumbnails.value = [];
+    frameCache.clear();
+    return;
+  }
+  frameCache.configure(
+    store.apiBaseUrl.replace(/\/+$/, ''),
+    id,
+    store.metadata.fps || 30
+  );
   await nextTick();
   generateThumbnails(id);
 });
@@ -151,6 +160,7 @@ function onLoadedMeta() {
 function seekTo(time: number) {
   if (videoRef.value) videoRef.value.currentTime = time;
   playback.seekTo(time);
+  frameCache.preload(time, store.metadata.total_duration || 60);
 }
 function triggerUpload() {
   // Clicking the dropzone triggers the TopBar file input
