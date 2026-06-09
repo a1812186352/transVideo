@@ -364,6 +364,9 @@ export const useWorkbenchStore = defineStore('workbench', () => {
       const sseUrl = `${base}/analyze/${project.videoId}/stream`;
       const es = new EventSource(sseUrl);
 
+      // ── 局部累积 SSE 流式到达的模块 ──
+      const localModules: any[] = [];
+
       const completed = await new Promise<{ moduleCount: number }>((resolve, reject) => {
         const timeout = setTimeout(() => {
           es.close();
@@ -375,6 +378,10 @@ export const useWorkbenchStore = defineStore('workbench', () => {
             const data = JSON.parse(event.data);
             if (data.type === 'segment') {
               const mod = data.module;
+              // 本地累积 + 实时写入 timelineStore（卡片逐步出现）
+              localModules.push(mod);
+              timeline.addModule(mod);
+              // 确保 addModule 不会触发 SSE 段内重复渲染；pushLog 仅作监控日志
               pushLog('Segment', `#${data.index} ${mod.type} @ ${fmtDuration(mod.start_time)} — ${mod.label || ''}`, 'data', '📦');
             } else if (data.type === 'done') {
               clearTimeout(timeout);
@@ -415,9 +422,24 @@ export const useWorkbenchStore = defineStore('workbench', () => {
             },
           },
         };
-        timeline.setModules(merged.modules); timeline.setTracks(merged.tracks || []); project.setMetadata(merged.metadata);
+        // ── REST 竞态保护：若返回空模块，保留 SSE 累积数据 ──
+        if (!merged.modules || merged.modules.length === 0) {
+          pushLog('⚠ REST 返回空模块，保留 SSE 实时数据', 'warn', '', '⚠');
+          if (localModules.length > 0) {
+            // 已通过 addModule 写入，但需要确保 tracks/metadata 更新
+            timeline.setTracks(merged.tracks || []);
+            project.setMetadata(merged.metadata);
+          } else {
+            throw new Error('REST 与 SSE 均未返回模块');
+          }
+        } else {
+          timeline.setModules(merged.modules);
+          timeline.setTracks(merged.tracks || []);
+          project.setMetadata(merged.metadata);
+        }
         project.setAnalysisStatus('completed');
-        finishMonitor(merged.metadata.total_duration ? merged.modules : result.script.modules);
+        const finalModules = merged.modules?.length ? merged.modules : localModules;
+        finishMonitor(merged.metadata.total_duration ? finalModules : result.script?.modules || localModules);
       } else {
         throw new Error('分析结果为空（后端未返回 script）');
       }
@@ -547,7 +569,8 @@ export const useWorkbenchStore = defineStore('workbench', () => {
      Shots callback
      ═══════════════════════════════════ */
   function onShotsChange(shots: Array<{ index: number; text: string; duration: string; ref_material_ids: string[] }>) {
-    // Rebuild modules from shots
+    // 空数组保护：防止意外清空已有模块列表
+    if (!shots || shots.length === 0) return;
     const newModules = shots.map((shot, i) => ({
       id: crypto.randomUUID(),
       type: 'video_segment' as ModuleType,
