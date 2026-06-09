@@ -2,16 +2,11 @@
   <div class="timeline">
     <div class="timeline__header">时间轴 · 模块编排</div>
     <div class="timeline__track" ref="scrollRef">
-      <template v-for="(mod, i) in mergedModules" :key="mod.id">
-        <!-- ═══ Merged indicator (when module combines >1 types) ═══ -->
-        <div v-if="mod.mergedTypes.length > 1" class="merge-badge" :title="mod.mergedTypes.join(' + ')">
-          {{ mod.mergedTypes.length }}合1
-        </div>
-
+      <template v-for="(mod, i) in timeline.modules" :key="mod.id">
         <!-- ═══ Module card ═══ -->
         <div
           class="timeline__card"
-          :class="[`timeline__card--${mod.mergedTypes[0]}`, { 'timeline__card--sel': timeline.selectedModuleId === mod.id }]"
+          :class="[`timeline__card--${mod.type}`, { 'timeline__card--sel': timeline.selectedModuleId === mod.id }]"
           :style="{ flex: mod.duration || 1 }"
           draggable="true"
           @dragstart="onDragStart(i, $event)"
@@ -20,7 +15,7 @@
           @click="onCardClick(mod)"
         >
           <div class="timeline__card-top">
-            <span class="timeline__card-type">{{ typeLabelForMerge(mod.mergedTypes) }}</span>
+            <span class="timeline__card-type">{{ typeLabel(mod.type) }}</span>
             <span class="timeline__card-dur">{{ fmtDuration(mod.duration) }}</span>
           </div>
           <!-- Bottom row: original timestamps + content tags -->
@@ -46,23 +41,20 @@ import { useTimelineStore } from '../stores/timelineStore';
 import { usePlaybackStore } from '../stores/playbackStore';
 import { useDragStateStore } from '../stores/dragStateStore';
 import { computePlacement } from '../lib/placementPolicy';
-import { useModuleMerge, mergedTypeLabel, type MergedModule } from '../composables/useModuleMerge';
-import type { ModuleType } from '../types/script';
+import type { Module, ModuleType } from '../types/script';
 
 const store = useProjectStore();
 const timeline = useTimelineStore();
 const playback = usePlaybackStore();
 const drag = useDragStateStore();
 
-// ── Merged module list (computed layer, original modules unchanged) ──
-const mergedModules = useModuleMerge(timeline.modules as any);
-const typeLabelForMerge = (types: ModuleType[]): string => mergedTypeLabel(types);
+
 
 // ── Drag reorder with snap + collision ──
 const scrollRef = ref<HTMLDivElement | null>(null);
 let dragIdx = -1;
 
-function onCardClick(mod: MergedModule) {
+function onCardClick(mod: Module) {
   // Select the primary module
   timeline.selectModule(mod.id);
   playback.seekTo(mod.start_time);
@@ -226,13 +218,7 @@ function fmtHMS(s: number): string {
 .timeline__card--effect      { border-left: 3px solid #8b5cf6; }
 .timeline__card--video_segment { border-left: 3px solid #ef4444; }
 
-/* ── Merge badge between cards ── */
-.merge-badge {
-  font-size: 8px; padding: 1px 4px; border-radius: 3px;
-  background: var(--accent-subtle); color: var(--accent);
-  flex-shrink: 0; white-space: nowrap; margin: 0 2px;
-  font-weight: 500;
-}
+
 
 /* ── Card top row (type + dur) ── */
 .timeline__card-top {
