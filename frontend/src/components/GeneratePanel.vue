@@ -51,7 +51,7 @@
       <button
         class="gen__btn"
         :class="{ 'gen__btn--processing': exportStatus === 'processing', 'gen__btn--done': exportStatus === 'completed' }"
-        :disabled="exportStatus === 'processing' || store.modules.length === 0"
+        :disabled="exportStatus === 'processing' || timeline.modules.length === 0"
         @click="doExport"
       >
         <template v-if="exportStatus === 'idle' || exportStatus === 'queued' || exportStatus === 'failed'">
@@ -105,9 +105,13 @@
 <script setup lang="ts">
 import { ref, computed } from 'vue';
 import { useProjectStore } from '../stores/project';
+import { useTimelineStore } from '../stores/timelineStore';
+import { usePlaybackStore } from '../stores/playbackStore';
 import { useWorkbenchStore } from '../stores/workbench';
 
 const store = useProjectStore();
+const timeline = useTimelineStore();
+const playback = usePlaybackStore();
 const ws = useWorkbenchStore();
 
 const monitorBody = ref<HTMLDivElement | null>(null);
@@ -122,7 +126,7 @@ const exportFps = ref(30);
 const exportProgress = ref(0);
 
 const exportStatus = computed(() => store.exportStatus);
-const totalDuration = computed(() => store.script.metadata.total_duration || 0);
+const totalDuration = computed(() => store.metadata.total_duration || 0);
 
 // ── Status helpers ──
 const statusLabel = computed(() => {

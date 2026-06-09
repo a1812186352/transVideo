@@ -112,8 +112,12 @@
 <script setup lang="ts">
 import { ref } from 'vue';
 import { useProjectStore } from '../stores/project';
+import { useTimelineStore } from '../stores/timelineStore';
+import { usePlaybackStore } from '../stores/playbackStore';
 
 const store = useProjectStore();
+const timeline = useTimelineStore();
+const playback = usePlaybackStore();
 const testing = ref(false);
 const testResult = ref('');
 const testOk = ref(false);

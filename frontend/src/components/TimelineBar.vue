@@ -2,7 +2,7 @@
   <div class="timeline">
     <div class="timeline__header">时间轴 · 模块编排</div>
     <div class="timeline__track" ref="scrollRef">
-      <template v-for="(mod, i) in store.modules" :key="mod.id">
+      <template v-for="(mod, i) in timeline.modules" :key="mod.id">
         <!-- ═══ Trend marker between cards ═══ -->
         <div v-if="i > 0" class="trend">
           <span v-if="brightnessTrend(mod)" class="trend__icon" :title="'亮度: ' + brightnessTrend(mod)">
@@ -17,7 +17,7 @@
         <!-- ═══ Module card ═══ -->
         <div
           class="timeline__card"
-          :class="[`timeline__card--${mod.type}`, { 'timeline__card--sel': store.selectedModuleId === mod.id }]"
+          :class="[`timeline__card--${mod.type}`, { 'timeline__card--sel': timeline.selectedModuleId === mod.id }]"
           :style="{ flex: mod.duration || 1 }"
           draggable="true"
           @dragstart="onDragStart(i, $event)"
@@ -46,20 +46,24 @@
 <script setup lang="ts">
 import { ref, computed, watch } from 'vue';
 import { useProjectStore } from '../stores/project';
+import { useTimelineStore } from '../stores/timelineStore';
+import { usePlaybackStore } from '../stores/playbackStore';
 import type { Module, ModuleType } from '../types/script';
 
 const store = useProjectStore();
+const timeline = useTimelineStore();
+const playback = usePlaybackStore();
 
 // ── Drag reorder ──
 const scrollRef = ref<HTMLDivElement | null>(null);
 let dragIdx = -1;
 
 function onCardClick(mod: Module) {
-  store.selectModule(mod.id);
-  store.seekTo(mod.start_time);
+  timeline.selectModule(mod.id);
+  playback.seekTo(mod.start_time);
 }
 
-watch(() => store.currentTime, (t) => {
+watch(() => playback.currentTime, (t) => {
   const video = document.querySelector('.preview__video') as HTMLVideoElement | null;
   if (video && Math.abs(video.currentTime - t) > 0.5) {
     video.currentTime = t;
@@ -73,11 +77,11 @@ function onDragStart(i: number, e: DragEvent) {
 }
 function onDragOver(toIdx: number, _e: DragEvent) {
   if (dragIdx < 0 || dragIdx === toIdx) return;
-  const mods = [...store.modules];
+  const mods = [...timeline.modules];
   const [moved] = mods.splice(dragIdx, 1);
   mods.splice(toIdx, 0, moved);
   dragIdx = toIdx;
-  store.script.modules = mods;
+  timeline.modules = mods;
 }
 function onDragEnd() { dragIdx = -1; }
 
@@ -95,8 +99,8 @@ const fmtDuration = (s: number): string => {
 };
 
 const progressPct = computed(() => {
-  if (!store.currentTime || !store.script.metadata.total_duration) return 0;
-  return Math.min(100, (store.currentTime / store.script.metadata.total_duration) * 100);
+  if (!playback.currentTime || !store.metadata.total_duration) return 0;
+  return Math.min(100, (playback.currentTime / store.metadata.total_duration) * 100);
 });
 
 /* ═══════════════════════════════════

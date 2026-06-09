@@ -94,8 +94,12 @@
 <script setup lang="ts">
 import { ref, computed, onMounted, reactive } from 'vue';
 import { useProjectStore } from '../stores/project';
+import { useTimelineStore } from '../stores/timelineStore';
+import { usePlaybackStore } from '../stores/playbackStore';
 
 const store = useProjectStore();
+const timeline = useTimelineStore();
+const playback = usePlaybackStore();
 
 // ── Tabs ──
 const tabs = [
@@ -108,7 +112,7 @@ const activeTab = ref('materials');
 // ── Script tab ──
 const scriptText = computed(() => {
   // Build script text from store modules
-  return store.modules.map(m => `${m.label || ''}: ${m.params?.text_content || ''}`).join('\n\n');
+  return timeline.modules.map(m => `${m.label || ''}: ${m.params?.text_content || ''}`).join('\n\n');
 });
 function onScriptEdit(e: Event) {
   const val = (e.target as HTMLTextAreaElement).value;

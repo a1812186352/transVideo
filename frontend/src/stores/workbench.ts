@@ -1,6 +1,8 @@
 import { ref, computed, nextTick } from 'vue';
 import { defineStore } from 'pinia';
 import { useProjectStore } from './project';
+import { useTimelineStore } from './timelineStore';
+import { usePlaybackStore } from './playbackStore';
 import type { ModuleType, UploadResult, AnalysisResult, ExportResult } from '../types/script';
 
 /**
@@ -9,6 +11,8 @@ import type { ModuleType, UploadResult, AnalysisResult, ExportResult } from '../
  */
 export const useWorkbenchStore = defineStore('workbench', () => {
   const project = useProjectStore();
+  const timeline = useTimelineStore();
+  const playback = usePlaybackStore();
 
   /* ═══════════════════════════════════
      UI State
@@ -85,7 +89,7 @@ export const useWorkbenchStore = defineStore('workbench', () => {
     pushLog('Pipeline', '任务初始化完成');
   }
 
-  function finishMonitor(modules: typeof project.script.modules) {
+  function finishMonitor(modules: typeof timeline.modules) {
     const sceneTimes = modules.filter(m => m.start_time > 0).map(m => m.start_time);
     for (let i = 0; i < sceneTimes.length; i++) {
       const m = modules.find(x => x.start_time === sceneTimes[i]);
@@ -130,7 +134,7 @@ export const useWorkbenchStore = defineStore('workbench', () => {
   });
 
   function seekVideo(time: number) {
-    project.seekTo(time);
+    playback.seekTo(time);
     const videoEl = document.querySelector('video') as HTMLVideoElement | null;
     if (videoEl) videoEl.currentTime = time;
   }
@@ -175,12 +179,12 @@ export const useWorkbenchStore = defineStore('workbench', () => {
      Selected module detail
      ═══════════════════════════════════ */
   const sceneTags = computed(() => {
-    const m = project.selectedModule as any;
+    const m = timeline.selectedModule as any;
     if (!m || !m.detail) return '[无]';
     return (m.detail.scene_tags || ['分析中…']).map((t: string) => `[${t}]`).join(' ');
   });
   const detailData = computed(() => {
-    const m = project.selectedModule as any;
+    const m = timeline.selectedModule as any;
     return m?.detail || null;
   });
 
@@ -188,7 +192,7 @@ export const useWorkbenchStore = defineStore('workbench', () => {
      Markers (analysis nodes)
      ═══════════════════════════════════ */
   const markers = computed(() => {
-    return project.modules
+    return timeline.modules
       .filter(mod => mod.start_time > 0)
       .map(mod => ({
         time: mod.start_time,
@@ -212,24 +216,24 @@ export const useWorkbenchStore = defineStore('workbench', () => {
   function onDropRow(e: DragEvent, toIdx: number) {
     e.preventDefault();
     if (_dragIdx < 0 || _dragIdx === toIdx) return;
-    const mods = [...project.modules];
+    const mods = [...timeline.modules];
     const [moved] = mods.splice(_dragIdx, 1);
     mods.splice(toIdx, 0, moved);
-    project.script.modules = mods;
+    timeline.modules = mods;
     _dragIdx = -1;
   }
 
   function moveModuleUp(i: number) {
     if (i <= 0) return;
-    const mods = [...project.modules];
+    const mods = [...timeline.modules];
     [mods[i - 1], mods[i]] = [mods[i], mods[i - 1]];
-    project.script.modules = mods;
+    timeline.modules = mods;
   }
   function moveModuleDown(i: number) {
-    if (i >= project.modules.length - 1) return;
-    const mods = [...project.modules];
+    if (i >= timeline.modules.length - 1) return;
+    const mods = [...timeline.modules];
     [mods[i], mods[i + 1]] = [mods[i + 1], mods[i]];
-    project.script.modules = mods;
+    timeline.modules = mods;
   }
 
   function addNewModule() {
@@ -243,11 +247,11 @@ export const useWorkbenchStore = defineStore('workbench', () => {
       params: {},
       children: [],
     };
-    project.addModule(mod);
+    timeline.addModule(mod);
   }
 
   function onModuleLabel(id: string, val: string) {
-    project.updateModule(id, { label: val });
+    timeline.updateModule(id, { label: val });
   }
 
   /* ═══════════════════════════════════
@@ -255,9 +259,9 @@ export const useWorkbenchStore = defineStore('workbench', () => {
      ═══════════════════════════════════ */
   function onScriptEdit(val: string) {
     moduleScript.value = val;
-    if (project.selectedModule) {
-      project.updateModule(project.selectedModule.id, {
-        params: { ...project.selectedModule.params, text_content: val },
+    if (timeline.selectedModule) {
+      timeline.updateModule(timeline.selectedModule.id, {
+        params: { ...timeline.selectedModule.params, text_content: val },
       });
     }
   }
@@ -266,7 +270,7 @@ export const useWorkbenchStore = defineStore('workbench', () => {
 
   function doExportScript(fmt: string) {
     showExportFmt.value = false;
-    const mods = project.selectedModule ? [project.selectedModule] : project.script.modules;
+    const mods = timeline.selectedModule ? [timeline.selectedModule] : timeline.modules;
     let content = '';
     let ext = 'txt';
     if (fmt === 'json') {
@@ -396,7 +400,7 @@ export const useWorkbenchStore = defineStore('workbench', () => {
       const result: AnalysisResult = await finalRes.json();
       if (result.script) {
         // 保留上传阶段更准确的元数据（cv2 实测分辨率/帧率，用户文件名）
-        const prevMeta = project.script.metadata;
+        const prevMeta = project.metadata;
         const merged = {
           ...result.script,
           metadata: {
@@ -410,7 +414,7 @@ export const useWorkbenchStore = defineStore('workbench', () => {
             },
           },
         };
-        project.setScript(merged);
+        timeline.setModules(merged.modules); timeline.setTracks(merged.tracks || []); project.setMetadata(merged.metadata);
         project.setAnalysisStatus('completed');
         finishMonitor(merged.metadata.total_duration ? merged.modules : result.script.modules);
       } else {
@@ -428,7 +432,7 @@ export const useWorkbenchStore = defineStore('workbench', () => {
      Export
      ═══════════════════════════════════ */
   async function handleExport() {
-    if (!project.videoId || project.modules.length === 0) return;
+    if (!project.videoId || timeline.modules.length === 0) return;
     project.setExportStatus('processing');
     project.clearError();
     exportDownloadUrl.value = null;
@@ -439,8 +443,8 @@ export const useWorkbenchStore = defineStore('workbench', () => {
     try {
       const base = project.apiBaseUrl.replace(/\/+$/, '');
       const scriptToSend = {
-        ...project.script,
-        metadata: { ...project.script.metadata },
+        ...timeline,
+        metadata: { ...project.metadata },
       };
 
       const res = await fetch(`${base}/export/${project.videoId}`, {
@@ -486,14 +490,14 @@ export const useWorkbenchStore = defineStore('workbench', () => {
       track_index: 0,
       params: { text_content: shot.text, ref_material_ids: shot.ref_material_ids },
     }));
-    project.script.modules = newModules as any;
+    timeline.modules = newModules as any;
   }
 
   /* ═══════════════════════════════════
      Formatting helpers
      ═══════════════════════════════════ */
   const fmtEta = (durSec: number): string => {
-    const fps = project.script.metadata.fps || 30;
+    const fps = project.metadata.fps || 30;
     const isApi = project.visionProvider === 'api' && !!project.visionApiUrl;
     const kf = Math.max(1, Math.ceil((durSec * fps) / (fps / 5) / Math.max(1, Math.ceil(durSec / 10))));
     const base = durSec * 0.25;

@@ -17,11 +17,11 @@
 
       <!-- Video info bar -->
       <div v-if="videoId" class="preview__info">
-        <span class="preview__info-title">{{ uploadFileName || store.script.metadata.title || '—' }}</span>
+        <span class="preview__info-title">{{ uploadFileName || store.metadata.title || '—' }}</span>
         <span class="preview__info-meta">
-          {{ store.script.metadata.resolution.width }}×{{ store.script.metadata.resolution.height }}
-          · {{ fmtDuration(store.script.metadata.total_duration) }}
-          · {{ store.script.metadata.fps }}fps
+          {{ store.metadata.resolution.width }}×{{ store.metadata.resolution.height }}
+          · {{ fmtDuration(store.metadata.total_duration) }}
+          · {{ store.metadata.fps }}fps
         </span>
       </div>
 
@@ -66,9 +66,13 @@
 <script setup lang="ts">
 import { ref, computed, watch, nextTick } from 'vue';
 import { useProjectStore } from '../stores/project';
+import { useTimelineStore } from '../stores/timelineStore';
+import { usePlaybackStore } from '../stores/playbackStore';
 import { useWorkbenchStore } from '../stores/workbench';
 
 const store = useProjectStore();
+const timeline = useTimelineStore();
+const playback = usePlaybackStore();
 const ws = useWorkbenchStore();
 
 const emit = defineEmits<{
@@ -93,7 +97,7 @@ const currentStep = computed(() => {
   return '正在分析…';
 });
 const uploadFileName = computed(() => ws.uploadFileName);
-const totalDuration = computed(() => store.script.metadata.total_duration || 0);
+const totalDuration = computed(() => store.metadata.total_duration || 0);
 
 const fmtDuration = (s: number): string => {
   if (!s || s <= 0) return '—';
@@ -115,7 +119,7 @@ watch(videoId, async (id) => {
 });
 
 async function generateThumbnails(id: string) {
-  const dur = store.script.metadata.total_duration || 60;
+  const dur = store.metadata.total_duration || 60;
   const count = Math.min(20, Math.floor(dur / 2));
   const interval = Math.max(0.5, dur / count);
   const base = store.apiBaseUrl.replace(/\/+$/, '');
@@ -137,16 +141,16 @@ function onTimeUpdate() {
 function onLoadedMeta() {
   // 视频元数据加载完成后，同步实际分辨率到 store（若后端未返回）
   const v = videoRef.value;
-  if (v && (!store.script.metadata.resolution.width || !store.script.metadata.resolution.height)) {
+  if (v && (!store.metadata.resolution.width || !store.metadata.resolution.height)) {
     if (v.videoWidth && v.videoHeight) {
-      store.script.metadata.resolution.width = v.videoWidth;
-      store.script.metadata.resolution.height = v.videoHeight;
+      store.metadata.resolution.width = v.videoWidth;
+      store.metadata.resolution.height = v.videoHeight;
     }
   }
 }
 function seekTo(time: number) {
   if (videoRef.value) videoRef.value.currentTime = time;
-  store.seekTo(time);
+  playback.seekTo(time);
 }
 function triggerUpload() {
   // Clicking the dropzone triggers the TopBar file input

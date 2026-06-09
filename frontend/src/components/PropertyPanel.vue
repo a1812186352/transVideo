@@ -101,11 +101,11 @@
           <AudioWaveform
             v-if="detail?.energy_curve?.length"
             :energy-curve="detail.energy_curve"
-            :duration="store.script.metadata.total_duration || 60"
-            :current-time="store.currentTime"
+            :duration="store.metadata.total_duration || 60"
+            :current-time="playback.currentTime"
             :bpm="detail?.bpm"
             :mood-labels="waveMoods"
-            @seek="store.seekTo"
+            @seek="playback.seekTo"
           />
         </div>
       </div>
@@ -135,10 +135,14 @@
 <script setup lang="ts">
 import { computed, reactive } from 'vue';
 import { useProjectStore } from '../stores/project';
+import { useTimelineStore } from '../stores/timelineStore';
+import { usePlaybackStore } from '../stores/playbackStore';
 import { useWorkbenchStore } from '../stores/workbench';
 import AudioWaveform from './AudioWaveform.vue';
 
 const store = useProjectStore();
+const timeline = useTimelineStore();
+const playback = usePlaybackStore();
 const ws = useWorkbenchStore();
 
 const groups = reactive({
@@ -148,7 +152,7 @@ function toggleGroup(key: keyof typeof groups) {
   groups[key] = !groups[key];
 }
 
-const selectedModule = computed(() => store.selectedModule);
+const selectedModule = computed(() => timeline.selectedModule);
 
 // 兼容后端可能的字段名
 const detail = computed(() => {
