@@ -82,13 +82,7 @@
             <!-- neutral hint -->
             <div v-if="detail?.is_dominantly_neutral" class="prop-hsv__hint">画面主体为中性色（白/灰/黑），色调分析仅供参考</div>
           </div>
-          <!-- 3c: color_zone_pcts text summary -->
-          <div v-if="zoneSummary" class="prop-row" style="font-size:11px;">{{ zoneSummary }}</div>
-          <!-- Legacy fallback -->
-          <div class="prop-swatches" v-if="detail?.color_palette?.length">
-            <span v-for="(c, i) in detail.color_palette" :key="i" class="prop-swatch" :style="{ background: c }" />
-          </div>
-          <div class="prop-row" style="margin-top: 4px;">{{ safeVal(detail?.color_tone) }}</div>
+
         </div>
       </div>
 
@@ -108,7 +102,8 @@
           <AudioWaveform
             v-if="detail?.energy_curve?.length"
             :energy-curve="detail.energy_curve"
-            :duration="store.metadata.total_duration || 60"
+            :duration="selectedModule?.duration || (detail.original_end - detail.original_start) || 5"
+            :start-time="selectedModule?.start_time ?? detail.original_start ?? 0"
             :current-time="playback.currentTime"
             :bpm="detail?.bpm"
             :mood-labels="waveMoods"
@@ -205,13 +200,10 @@ const colorZones = computed(() => {
   if (!pcts || typeof pcts !== 'object') return [];
   return HSV_ZONE_CONFIG
     .filter(z => pcts[z.key] != null)
-    .map(z => ({ ...z, pct: Math.round(pcts[z.key] * 100) }));
+    .map(z => ({ ...z, pct: Math.round(pcts[z.key]) }));
 });
 
-const zoneSummary = computed(() => {
-  if (!colorZones.value.length) return '';
-  return colorZones.value.map(z => `${z.label} ${z.pct}%`).join(' / ');
-});
+
 
 /* ── 3b: Mood mapping ── */
 const MOOD_MAP: Record<string, string> = {
@@ -340,9 +332,7 @@ const energyBars = computed(() => {
 .detect-suspicious { background: #f0b429; }
 .detect-rejected   { background: #f85149; }
 
-/* ── Color swatches ── */
-.prop-swatches { display: flex; gap: 2px; margin-top: 4px; }
-.prop-swatch { height: 8px; flex: 1; border-radius: 2px; }
+
 
 /* ── HSV stacked bar ── */
 .prop-hsv { margin: 6px 0 4px; }
