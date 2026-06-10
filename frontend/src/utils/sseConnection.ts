@@ -65,7 +65,7 @@ export class SseClient {
       try {
         const data = JSON.parse(event.data);
         this.options.onMessage(data);
-      } catch { /* ignore parse errors */ }
+      } catch (err) { console.warn('SSE parse error:', err); }
     };
 
     this.es.onopen = () => {

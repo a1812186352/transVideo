@@ -29,6 +29,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from backend.log_config import setup_logging
 from backend.routers import upload, analysis, export, materials
 from backend.middleware.error_handler import register_error_handlers
+from backend.middleware.auth import install_auth_middleware
 
 # Initialize logging (console + rotating file handler)
 _log_path = setup_logging()
@@ -212,6 +213,9 @@ app.include_router(analysis.router)
 app.include_router(export.router)
 
 app.include_router(materials.router)
+
+# ── Optional API Key authentication (enabled via TRANVIDEO_API_KEY env) ──
+install_auth_middleware(app)
 
 # ── Error handlers (after routers so app-level handlers take precedence) ──
 register_error_handlers(app)

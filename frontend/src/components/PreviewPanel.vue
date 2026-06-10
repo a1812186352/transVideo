@@ -53,11 +53,13 @@
         <div
           v-for="(t, i) in thumbnails"
           :key="i"
+          ref="thumbRefs"
           class="preview__thumb"
           :class="{ 'preview__thumb--active': Math.abs(t.time - currentTime) < 0.5 }"
           @click="seekTo(t.time)"
         >
-          <img :src="t.src" :alt="`t${i}`" loading="lazy" />
+          <img v-if="t.visible" :src="t.src" :alt="`t${i}`" @error="onThumbError(i)" />
+          <div v-else class="preview__thumb-ph" />
         </div>
       </div>
     </div>
@@ -65,7 +67,7 @@
 </template>
 
 <script setup lang="ts">
-import { ref, computed, watch, nextTick } from 'vue';
+import { ref, computed, watch, nextTick, onMounted, onUnmounted } from 'vue';
 import { useProjectStore } from '../stores/project';
 import { useTimelineStore } from '../stores/timelineStore';
 import { usePlaybackStore } from '../stores/playbackStore';
@@ -119,9 +121,41 @@ const fmtDuration = (s: number): string => {
   return min > 0 ? `${min}:${pad(sec)}` : `0:${pad(sec)}`;
 };
 
-// ── Thumbnails (generated from video metadata) ──
-interface Thumb { time: number; src: string; }
+// ── Thumbnails (lazy load via IntersectionObserver) ──
+interface Thumb { time: number; src: string; visible: boolean; error: boolean; }
 const thumbnails = ref<Thumb[]>([]);
+const thumbRefs = ref<HTMLElement[]>([]);
+let observer: IntersectionObserver | null = null;
+
+onMounted(() => {
+  observer = new IntersectionObserver((entries) => {
+    for (const entry of entries) {
+      const idx = thumbRefs.value.indexOf(entry.target as HTMLElement);
+      if (idx >= 0 && entry.isIntersecting) {
+        thumbnails.value[idx] = { ...thumbnails.value[idx], visible: true };
+        observer?.unobserve(entry.target);
+      }
+    }
+  }, { rootMargin: '100px' });
+});
+
+onUnmounted(() => observer?.disconnect());
+
+watch(thumbnails, () => {
+  nextTick(() => {
+    if (observer) {
+      for (const el of thumbRefs.value) {
+        if (el) observer.observe(el);
+      }
+    }
+  });
+}, { deep: true });
+
+function onThumbError(i: number) {
+  if (thumbnails.value[i]) {
+    thumbnails.value[i] = { ...thumbnails.value[i], error: true };
+  }
+}
 
 watch(videoId, async (id) => {
   if (!id) {
@@ -147,7 +181,7 @@ async function generateThumbnails(id: string) {
     const res = await fetch(`${base}/upload/video/${id}/thumbnails?interval=${interval}`);
     if (!res.ok) throw new Error(`HTTP ${res.status}`);
     const data: { timestamp: number; data_uri: string }[] = await res.json();
-    thumbnails.value = data.map(t => ({ time: t.timestamp, src: t.data_uri }));
+    thumbnails.value = data.map(t => ({ time: t.timestamp, src: t.data_uri, visible: false, error: false }));
   } catch (e) {
     console.warn('Failed to load thumbnails:', e);
     thumbnails.value = [];
@@ -363,5 +397,16 @@ function onDrop(e: DragEvent) {
   display: block;
 }
 
+
+
+/* ── Thumb error placeholder ── */
+.preview__thumb-ph {
+  width: 100%; height: 100%;
+  display: flex; align-items: center; justify-content: center;
+  background: var(--bg-surface);
+  font-size: 9px; color: var(--text-muted);
+}
+.preview__thumb-ph::after { content: '加载失败'; }
+.preview__thumb img[src=""] { display: none; }
 
 </style>

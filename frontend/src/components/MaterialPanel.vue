@@ -97,6 +97,7 @@ import { useTimelineStore } from '../stores/timelineStore';
 import { usePlaybackStore } from '../stores/playbackStore';
 import MaterialValidator from './MaterialValidator.vue';
 import ScriptPanel from './ScriptPanel.vue';
+import { showErrorToast } from '../utils/errorHandling';
 
 const store = useProjectStore();
 const timeline = useTimelineStore();
@@ -145,7 +146,7 @@ async function loadMaterials() {
     const base = props.apiBaseUrl.replace(/\/+$/, '');
     const res = await fetch(`${base}/materials/list`);
     if (res.ok) materials.value = await res.json();
-  } catch { /* ignore */ }
+  } catch (err) { console.error('Failed to load materials:', err); showErrorToast(err); }
 }
 
 function triggerUpload() { fileInput.value?.click(); }
@@ -174,7 +175,7 @@ async function uploadFiles(files: File[]) {
         const mat = await res.json();
         materials.value.unshift(mat);
       }
-    } catch { /* skip */ }
+    } catch (err) { console.error('Failed to upload material:', err); showErrorToast(err); }
   }
   uploading.value = false;
 }
@@ -184,7 +185,7 @@ async function deleteMaterial(mid: string) {
     const base = (props.apiBaseUrl || '').replace(/\/+$/, '');
     await fetch(`${base}/materials/${mid}`, { method: 'DELETE' });
     materials.value = materials.value.filter(m => m.material_id !== mid);
-  } catch { /* ignore */ }
+  } catch (err) { console.error('Failed to delete material:', err); showErrorToast(err); }
 }
 
 function onDragStart(id: string, e: DragEvent) {

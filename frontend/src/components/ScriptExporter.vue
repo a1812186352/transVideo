@@ -59,6 +59,7 @@
 
 <script setup lang="ts">
 import { ref, computed } from 'vue';
+import { showErrorToast } from '../utils/errorHandling';
 import { useTimelineStore } from '../stores/timelineStore';
 import { useProjectStore } from '../stores/project';
 import {
@@ -114,7 +115,7 @@ async function copyToClipboard() {
   try {
     const { content } = exportScript(script.value, selected.value);
     await navigator.clipboard.writeText(content);
-  } catch { /* ignore */ }
+  } catch (err) { console.error('Export failed:', err); showErrorToast(err); }
 }
 
 function doDownload() {
