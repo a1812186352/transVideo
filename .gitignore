@@ -41,3 +41,7 @@ Desktop.ini
 
 # Test artifacts
 .pytest_cache/
+
+# Log files
+logs/
+crash_dumps/

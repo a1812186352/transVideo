@@ -16769,3 +16769,13 @@ ConnectionResetError: [WinError 10054] 远程主机强迫关闭了一个现有�
 2026-06-10 20:56:20 | WARNING  | understanding.signal.visual_features | visual_features.py:208 | Visual features: 52/65 frames OK
 2026-06-10 20:56:20 | INFO     | understanding.pipeline_orchestrator | pipeline_orchestrator.py:775 | Visual features from opencv: 65 frames, 0 descriptions (api_time=0.00s)
 2026-06-10 20:56:20 | INFO     | backend.routers.analysis | analysis.py:63 | Pipeline done for 27455433f2d3470a, modules: 14
+{"timestamp": "2026-06-10T21:15:27.265686", "level": "INFO", "logger": "root", "module": "log_config", "line": 75, "message": "Logging initialized — file=D:\\xiangmuji\\transVideo\\logs\\transvideo.log level=INFO console=True"}
+{"timestamp": "2026-06-10T21:15:27.275356", "level": "INFO", "logger": "backend.main", "module": "main", "line": 251, "message": "Data directory: C:\\Users\\18121\\.transVideo"}
+{"timestamp": "2026-06-10T21:15:27.276613", "level": "INFO", "logger": "backend.main", "module": "main", "line": 273, "message": "Analysis store: no stale jobs."}
+{"timestamp": "2026-06-10T21:15:27.278708", "level": "INFO", "logger": "backend.main", "module": "main", "line": 290, "message": "Export store: no stale jobs."}
+{"timestamp": "2026-06-10T21:15:27.279641", "level": "INFO", "logger": "backend.main", "module": "main", "line": 293, "message": "Startup recovery scan complete."}
+{"timestamp": "2026-06-10T21:15:28.558115", "level": "INFO", "logger": "root", "module": "log_config", "line": 75, "message": "Logging initialized — file=D:\\xiangmuji\\transVideo\\logs\\transvideo.log level=INFO console=True"}
+{"timestamp": "2026-06-10T21:15:28.569211", "level": "INFO", "logger": "backend.main", "module": "main", "line": 251, "message": "Data directory: C:\\Users\\18121\\.transVideo"}
+{"timestamp": "2026-06-10T21:15:28.570596", "level": "INFO", "logger": "backend.main", "module": "main", "line": 273, "message": "Analysis store: no stale jobs."}
+{"timestamp": "2026-06-10T21:15:28.572605", "level": "INFO", "logger": "backend.main", "module": "main", "line": 290, "message": "Export store: no stale jobs."}
+{"timestamp": "2026-06-10T21:15:28.573357", "level": "INFO", "logger": "backend.main", "module": "main", "line": 293, "message": "Startup recovery scan complete."}

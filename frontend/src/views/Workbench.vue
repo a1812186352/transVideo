@@ -75,6 +75,15 @@
       <!-- Top bar: Logo + actions + view switcher -->
       <header class="migration__topbar">
         <div class="migration__logo">trans<span class="migration__logo-accent">Video</span> · 视频拆解与生成工作台</div>
+      <button class="mg-btn mg-btn--clear" @click="clearCache" title="清除采样帧与脚本缓存">🗑 清除缓存</button>
+        <div class="migration__actions">
+          <button class="mg-btn mg-btn--primary" @click="ws.handleAnalyze()"
+                  :disabled="!project.videoId || project.analysisStatus === 'processing'">
+            {{ project.analysisStatus === 'processing' ? '分析中…' : project.analysisStatus === 'completed' ? '✓ 分析完成' : '分析视频结构' }}
+          </button>
+          <button class="mg-btn" v-if="project.analysisStatus === 'processing'" @click="ws.cancelAnalysis()">⏹ 停止</button>
+          <span v-if="project.analysisStatus === 'completed'" class="mg-status-hint">选择模板后点击「结构迁移」生成蓝图</span>
+        </div>
         <div class="view-switcher view-switcher--migration">
           <button class="view-switcher__btn" @click="viewMode = 'classic'">经典工作台</button>
           <button class="view-switcher__btn view-switcher__btn--active">迁移工作台</button>
@@ -147,21 +156,40 @@
             </div>
           </div>
 
-          <!-- 生成预览（下方，自适应） -->
-          <div class="mg-panel mg-panel--preview">
+          <!-- 生成预览（下方，自适应） — 模板蓝图优先，降级到硬编码 -->          <div class="mg-panel mg-panel--preview">
             <div class="mg-panel__header">
-              <span>生成预览</span>
-              <span class="mg-panel__badge" :class="{ 'mg-panel__badge--danger': gapCount > 0 }">
+              <span>{{ blueprint ? '生成蓝图' : '生成预览' }}</span>
+              <span v-if="blueprintLoading" class="mg-panel__badge">加载中…</span>
+              <span v-else-if="blueprint" class="mg-panel__badge">
+                {{ blueprint.template.label }} · {{ blueprint.summary.block_count }} 模块
+              </span>
+              <span v-else class="mg-panel__badge" :class="{ 'mg-panel__badge--danger': gapCount > 0 }">
                 {{ gapCount > 0 ? `${gapCount} 缺口` : '素材充足' }}
               </span>
               <button class="mg-panel__export-btn" @click="ws.handleExport">导出视频</button>
             </div>
             <div class="mg-panel__body">
-              <GenerationPreview
-                :slots="genSlots"
-                @remove-slot="onRemoveGenSlot"
-                @fill-slot="onFillGenSlot"
-              />
+              <!-- Blueprint timeline blocks -->
+              <div v-if="blueprint" class="blueprint-track">
+                <div v-for="(b, i) in blueprint.blocks" :key="i" class="blueprint-block"
+                     :class="'blueprint-block--' + b.status"
+                     :style="{ flex: b.duration || 1 }">
+                  <span class="blueprint-block__name">{{ b.name }}</span>
+                  <span class="blueprint-block__time">{{ b.start_time.toFixed(1) }}-{{ (b.start_time + b.duration).toFixed(1) }}s</span>
+                  <span class="blueprint-block__badge">{{ statusLabelBP(b.status) }}</span>
+                </div>
+                <div v-if="blueprint.summary.required_missing?.length" class="blueprint-warn">
+                  ⚠ 缺核心: {{ blueprint.summary.required_missing.join('、') }}
+                </div>
+              </div>
+              <div v-else-if="blueprintLoading" class="gen-preview-placeholder">生成蓝图中…</div>
+              <div v-else>
+                <GenerationPreview
+                  :slots="genSlots"
+                  @remove-slot="onRemoveGenSlot"
+                  @fill-slot="onFillGenSlot"
+                />
+              </div>
             </div>
           </div>
         </section>
@@ -241,18 +269,44 @@ const workbenchStyle = computed(() => ({
 
 // ── Template selection state ──
 const templateSelected = ref(false);
+const selectedTemplateName = ref('');
 function onTemplateSelect(name: string) {
   templateSelected.value = true;
-  console.log('Template selected:', name);
+  selectedTemplateName.value = name;
 }
 
-// ── Structure migration ──
-function onMigrate() {
-  if (!templateSelected.value) return;
-  // Update migration steps to reflect migration triggered
-  migrationSteps.value[2].done = true;
-  migrationSteps.value[3].done = false;
-  console.log('Structure migration triggered');
+const TEMPLATE_ID_MAP: Record<string, string> = {
+  '快节奏混剪': 'mashup', '口播带货': 'shopping_live',
+  '产品测评': 'product_review', 'Vlog 叙事': 'talking_head', '其他': 'none',
+};
+
+// ── Blueprint state ──
+import type { BlueprintResult } from '../types/script';
+const blueprint = ref<BlueprintResult | null>(null);
+const blueprintLoading = ref(false);
+
+function statusLabelBP(s: string): string {
+  const m: Record<string, string> = { matched: '✅', missing: '⚠', passthrough: '⬡' };
+  return m[s] || s;
+}
+
+async function onMigrate() {
+  if (!templateSelected.value || !project.videoId) return;
+  const type = TEMPLATE_ID_MAP[selectedTemplateName.value] || 'none';
+  blueprintLoading.value = true;
+  blueprint.value = null;
+  try {
+    const base = project.apiBaseUrl.replace(/\/+$/, '');
+    const res = await fetch(`${base}/export/blueprint`, {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ template_type: type, job_id: project.videoId }),
+    });
+    if (!res.ok) throw new Error(`HTTP ${res.status}`);
+    blueprint.value = await res.json();
+    migrationSteps.value[2].done = true;
+    migrationSteps.value[3].done = false;
+  } catch (e) { console.warn('Blueprint merge failed:', e); }
+  finally { blueprintLoading.value = false; }
 }
 
 // ── Real data from analysis result ──
@@ -421,6 +475,18 @@ const migrationSteps = ref([
 function onTopBarUpload(file: File) {
   ws.doUpload(file);
 }
+function clearCache() {
+  timeline.setModules([]);
+  timeline.setTracks([]);
+  project.setMetadata({ title: '', total_duration: 0, fps: 30, resolution: { width: 0, height: 0 }, source_video_id: '', description: '', author: '', created_at: '', tags: [] } as any);
+  project.setVideoId(null);
+  project.setUploadStatus('idle');
+  project.setAnalysisStatus('idle');
+  project.setExportStatus('idle');
+  project.clearError();
+  ws.monitorLogs.length = 0;
+}
+
 function onPreviewUpload(file: File) {
   ws.doUpload(file);
 }
@@ -527,6 +593,21 @@ function onPreviewUpload(file: File) {
 }
 .migration__logo { font-weight: 700; font-size: 15px; letter-spacing: -0.5px; white-space: nowrap; }
 .migration__logo-accent { color: var(--accent); }
+.mg-btn--clear {
+  background: transparent;
+  border: 1px solid var(--border);
+  color: var(--text-muted);
+  font-size: 11px;
+  padding: 4px 10px;
+  border-radius: var(--radius-sm);
+  cursor: pointer;
+  transition: all var(--transition);
+}
+.mg-btn--clear:hover {
+  border-color: #f85149;
+  color: #f85149;
+}
+
 .migration__actions { display: flex; gap: 8px; align-items: center; }
 
 .mg-btn {
@@ -542,6 +623,7 @@ function onPreviewUpload(file: File) {
 .mg-btn--primary:hover:not(:disabled) { box-shadow: 0 0 14px rgba(91, 141, 239, 0.15); }
 .mg-btn--primary:disabled { background: var(--border); border-color: var(--border); color: var(--text-muted); }
 .mg-btn--success { background: var(--slot-closing); border-color: var(--slot-closing); color: #0f1117; font-weight: 600; }
+.mg-status-hint { font-size: 11px; color: var(--text-muted); white-space: nowrap; }
 
 .migration__main {
   display: grid; grid-template-columns: 1fr 1fr; gap: 12px;
@@ -583,6 +665,22 @@ function onPreviewUpload(file: File) {
 }
 .mg-panel__badge--danger { background: rgba(239, 68, 68, 0.12); color: var(--gap-solid); }
 .mg-panel__hint { font-size: 10px; color: var(--text-muted); }
+
+/* ── Blueprint timeline ── */
+.blueprint-track { display: flex; align-items: center; gap: 2px; padding: 6px 8px; height: 100%; overflow-x: auto; }
+.blueprint-block {
+  display: flex; flex-direction: column; align-items: center; justify-content: center;
+  min-width: 60px; border-radius: var(--radius-sm); padding: 4px 8px;
+  border: 1px solid var(--border); gap: 2px; flex-shrink: 0;
+}
+.blueprint-block--matched { border-color: #1a7f37; background: #1a7f3710; }
+.blueprint-block--missing { border-color: #da3633; background: #da363310; border-style: dashed; }
+.blueprint-block--passthrough { border-color: var(--text-muted); background: var(--bg-surface); }
+.blueprint-block__name { font-size: 11px; font-weight: 600; color: var(--text-primary); white-space: nowrap; }
+.blueprint-block__time { font-size: 9px; color: var(--text-muted); font-family: var(--font-mono); }
+.blueprint-block__badge { font-size: 9px; color: var(--text-muted); }
+.blueprint-warn { padding: 4px 8px; font-size: 10px; color: #da3633; background: #da363310; flex-shrink: 0; }
+.gen-preview-placeholder { display: flex; align-items: center; justify-content: center; height: 100%; font-size: 11px; color: var(--text-muted); }
 
 .mg-panel__export-btn {
   min-width: 60px;
