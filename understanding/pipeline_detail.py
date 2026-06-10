@@ -409,6 +409,7 @@ def build_detail(
             ][:ENERGY_CURVE_BINS]
 
     return {
+        "sub_type": sub_type,
         "scene_tags": scene_tags,
         "composition": composition or "无",
         "visual_elements": content_parts if content_parts else visual_elements[:3],
@@ -877,18 +878,8 @@ def derive_visual_from_features(
         motion = "静止定镜"
         motion_label_code = "STILL"
 
-    # ── Build enriched text description ──
-    motion_parts = [motion]
-    if fl >= _still:
-        motion_parts.append(f"光流 {fl:.1f}")
-    if scale_factor:
-        motion_parts.append(f"缩放 ×{scale_factor}")
-    if rotation_angle:
-        motion_parts.append(f"旋转 {rotation_angle}°")
-    if displacement:
-        motion_parts.append(f"位移 {displacement}px")
-
-    result.append(f"动效: {'｜'.join(motion_parts)}")
+    # ── Build simplified motion description ──
+    result.append(f"动效: {motion}")
 
     # ── Structured data ──
 

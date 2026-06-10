@@ -24,6 +24,16 @@
   --transition:     160ms ease;
   --font-mono:      'JetBrains Mono', 'Cascadia Code', monospace;
   --font-sans:      -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+
+  /* ── Slot / Gap 结构标签颜色（浅色）── */
+  --slot-opening:    #3b6fd4;
+  --slot-highlight:  #d97706;
+  --slot-transition: #7c3aed;
+  --slot-closing:    #059669;
+  --slot-effect:     #db2777;
+  --gap-solid:       #dc2626;
+  --gap-soft:        #d97706;
+  --gap-filled:      #059669;
 }
 
 [data-theme="dark"] {
@@ -40,4 +50,14 @@
   --border:         #262640;
   --shadow-sm:      0 1px 3px rgba(0,0,0,0.3);
   --shadow-md:      0 4px 12px rgba(0,0,0,0.5);
+
+  /* ── Slot / Gap 结构标签颜色（深色）── */
+  --slot-opening:    #5b8def;
+  --slot-highlight:  #f59e0b;
+  --slot-transition: #a78bfa;
+  --slot-closing:    #34d399;
+  --slot-effect:     #f472b6;
+  --gap-solid:       #ef4444;
+  --gap-soft:        #f59e0b;
+  --gap-filled:      #34d399;
 }

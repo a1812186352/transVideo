@@ -149,7 +149,7 @@ export interface CreativePattern {
 
 export interface AnalysisResult {
   video_id: string;
-  status: 'processing' | 'completed' | 'failed';
+  status: 'processing' | 'completed' | 'failed' | 'canceled';
   script?: MigratableScript;
   creative_pattern?: CreativePattern;
   error?: string;
@@ -167,6 +167,30 @@ export interface UploadResult {
 }
 
 /** Export response */
+export interface BlueprintBlock {
+  name: string;
+  template_key: string;
+  start_time: number;
+  duration: number;
+  status: 'matched' | 'missing' | 'passthrough';
+  source_module?: string;
+  required?: boolean;
+  detail?: Record<string, any>;
+}
+
+export interface BlueprintResult {
+  template: { type: string; label: string };
+  blocks: BlueprintBlock[];
+  summary: {
+    block_count: number;
+    total_duration: number;
+    matched: number;
+    missing: number;
+    passthrough: number;
+    required_missing: string[];
+  };
+}
+
 export interface ExportResult {
   video_id: string;
   status: 'queued' | 'processing' | 'completed' | 'failed' | 'canceled';

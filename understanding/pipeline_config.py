@@ -223,6 +223,11 @@ SUB_TYPE_EFFECT = {
     "slow_motion":       "慢动作",
 }
 
+# ── Module types (6 types, content = unclassified-but-visible segment) ──
+
+MODULE_TYPE_CONTENT = "content"
+MODULE_TYPES = ["title", "video_segment", "transition", "effect", "content"]
+
 # ── Video Type Classifier (heuristic rule-engine, zero ML deps) ──
 VIDEO_TYPE_FRAME_SAMPLE_COUNT = 8
 VIDEO_TYPE_CONFIDENCE_THRESHOLD = 0.4  # below this → fallback "vlog"
@@ -264,3 +269,48 @@ SUBJECT_COVERAGE_FULL = 0.25          # > this → "饱满", between → "适中
 
 # Subject weighting
 PERSON_WEIGHT_MULTIPLIER = 1.5        # person class area × multiplier
+
+# ── Module-level creative labels (11 tags) ──
+
+# Content labels: sub_type → creative tag
+CONTENT_LABEL_MAP = {
+    "brand_intro":       "品牌开场",
+    "character_entry":   "人物引入",
+    "product_demo":      "动作高燃",
+    "voice_core":        "台词金句",
+    "multi_angle":       "视觉爆发",
+    "emotion_climax":    "情绪峰值",
+    "scene_setting":     "环境铺垫",
+    "dialogue_normal":   "台词推进",
+    # Also accept already-Chinese sub_types from _derive_sub_type
+    "品牌开场":            "品牌开场",
+    "人物引入":            "人物引入",
+    "动作高燃":            "动作高燃",
+    "台词金句":            "台词金句",
+    "视觉爆发":            "视觉爆发",
+    "情绪峰值":            "情绪峰值",
+    "标题卡":              "标题卡",
+    "品牌露出":            "品牌露出",
+    "硬切":                "硬切",
+    "匹配剪辑":            "匹配剪辑",
+    "视觉特效":            "视觉特效",
+    "同步淡出":            "同步淡出",
+}
+
+# Scene-tag fallback: scene_tags[0] → creative tag
+SCENE_TAG_MAP = {
+    "人物出镜":  "人物引入",
+    "产品展示":  "动作高燃",
+    "口播台词":  "台词金句",
+    "好评展示":  "情绪峰值",
+    "效果对比":  "情绪峰值",
+    "多角度":    "视觉爆发",
+}
+
+# Motion-based rules: (predicate, label) in priority order
+MOTION_LABEL_RULES = [
+    (lambda m: "硬切" in m,      "硬切"),
+    (lambda m: "匹配剪辑" in m,  "匹配剪辑"),
+    (lambda m: "效果" in m or "特效" in m or "包装" in m, "视觉特效"),
+    (lambda m: "淡出" in m or "淡入" in m, "同步淡出"),
+]

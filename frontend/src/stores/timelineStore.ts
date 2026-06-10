@@ -62,6 +62,12 @@ export const useTimelineStore = defineStore('timeline', () => {
     return map;
   });
 
+  function resetTimeline() {
+    modules.value = [];
+    selectedModuleId.value = null;
+    localStorage.removeItem('transvideo:timeline_modules');
+  }
+
   function setModules(list: Module[]) { modules.value = list; }
   function setTracks(list: Track[]) { tracks.value = list; }
   function selectModule(id: string | null) { selectedModuleId.value = id; }
@@ -105,7 +111,7 @@ export const useTimelineStore = defineStore('timeline', () => {
 
   return {
     modules, tracks, selectedModuleId, selectedModule, totalDuration, modulesByTrack,
-    setModules, setTracks, selectModule, addTrack,
+    resetTimeline, setModules, setTracks, selectModule, addTrack,
     addModule, removeModule, updateModule, reorderModule,
   };
 });

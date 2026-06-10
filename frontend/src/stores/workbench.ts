@@ -301,7 +301,13 @@ export const useWorkbenchStore = defineStore('workbench', () => {
      Upload
      ═══════════════════════════════════ */
   async function doUpload(file: File) {
+    // Reset all state from previous video before starting a new upload
+    timeline.resetTimeline();
+    project.resetProject();
     uploadFileSize.value = file.size;
+    uploadFileName.value = '';
+    exportDownloadUrl.value = null;
+    monitorLogs.value = [];
     project.setUploadStatus('uploading');
     project.clearError();
     try {
@@ -349,8 +355,27 @@ export const useWorkbenchStore = defineStore('workbench', () => {
   /* ═══════════════════════════════════
      Analyze
      ═══════════════════════════════════ */
+  function cancelAnalysis() {
+    if (!project.videoId) return;
+    const base = project.apiBaseUrl.replace(/\/+$/, '');
+    // Fire-and-forget: tell backend to drop this job
+    fetch(`${base}/analyze/${project.videoId}`, { method: 'DELETE' }).catch(() => {});
+    // Reset local state immediately — no need to wait for backend
+    timeline.resetTimeline();
+    analysisResult.value = null;
+    analysisActualTime.value = '';
+    project.setAnalysisStatus('idle');
+    stopMonitor();
+    pushLog('Pipeline', '分析已取消', 'warn', '⏹');
+  }
+
   async function handleAnalyze() {
     if (!project.videoId) return;
+    // Clear previous analysis data for re-analysis
+    if (project.analysisStatus === 'completed' || project.analysisStatus === 'failed') {
+      timeline.resetTimeline();
+      analysisResult.value = null;
+    }
     project.setAnalysisStatus('processing');
     project.clearError();
     startMonitor();
@@ -670,7 +695,7 @@ export const useWorkbenchStore = defineStore('workbench', () => {
     // Upload
     doUpload, onDrop, onVideoSelected,
     // Analyze
-    handleAnalyze,
+    cancelAnalysis, handleAnalyze,
     // Export
     exportProgress, handleExport,
     // Shots

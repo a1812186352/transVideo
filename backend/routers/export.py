@@ -320,3 +320,53 @@ async def cancel_export(video_id: str) -> ExportResponse:
     _push_progress(video_id, 0, "取消中…", 0)
 
     return ExportResponse(video_id=video_id, status="canceled")
+
+
+# ═══════════════════════════════════════════════════════
+#  Blueprint — template × module_tree merge
+# ═══════════════════════════════════════════════════════
+
+@router.post("/blueprint")
+async def generate_blueprint(body: dict) -> dict:
+    """Generate a blueprint by merging a template preset with the
+    deconstructed module tree from a completed analysis.
+
+    Request body::
+
+        {
+            "template_type": "product_review",
+            "job_id": "abc1234..."
+        }
+
+    Returns a BlueprintResult dict.
+    """
+    template_type = body.get("template_type", "product_review")
+    job_id = body.get("job_id", "")
+
+    if not job_id:
+        raise HTTPException(status_code=400, detail="job_id is required")
+
+    # Load module_tree from analysis job store
+    from backend.store import JobStore
+    from backend.store.job_store import get_data_dir
+    js = JobStore("analysis", base_dir=get_data_dir())
+    job = js.get_job(job_id)
+    if not job:
+        raise HTTPException(status_code=404, detail=f"No analysis job found: {job_id}")
+
+    result = job.get("result", {})
+    if not isinstance(result, dict):
+        raise HTTPException(status_code=400, detail="Analysis result incomplete")
+
+    script_dict = result.get("script", {})
+    module_tree = script_dict.get("modules", []) if isinstance(script_dict, dict) else []
+
+    total_dur = script_dict.get("metadata", {}).get("total_duration", 0.0) if isinstance(script_dict, dict) else 0.0
+
+    try:
+        from generation.blueprint_merger import merge
+        blueprint = merge(template_type, module_tree, total_dur)
+        return blueprint
+    except Exception as exc:
+        logger.exception("Blueprint merge failed for %s: %s", job_id, exc)
+        raise HTTPException(status_code=500, detail=str(exc))

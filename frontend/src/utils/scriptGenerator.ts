@@ -62,18 +62,31 @@ export function composeScript(modules: Module[], title?: string): ComposedScript
     const modStart = mod.start_time;
     const modDur = mod.duration || 3;
 
-    // ── Content description ──
+    // ── Content description (deduped) ──
     const parts: string[] = [];
+    const seen = new Set<string>();
     const tags: string[] = Array.isArray(detail.content_tags) ? detail.content_tags : [];
-    if (tags.length) parts.push(tags.slice(0, 3).join(' · '));
-    if (detail.voice_content && detail.voice_content !== '无')
-      parts.push(`配音: ${detail.voice_content}`);
-    if (detail.motion && detail.motion !== '无')
-      parts.push(`运镜: ${detail.motion}`);
-    if (detail.color_tone && detail.color_tone !== '未知')
-      parts.push(`色调: ${detail.color_tone}`);
-    if (detail.bgm_type && detail.bgm_type !== '无' && detail.bgm_type !== '未知')
-      parts.push(`背景乐: ${detail.bgm_type}`);
+    if (tags.length) {
+      const tagStr = tags.slice(0, 3).join(' · ');
+      parts.push(tagStr);
+      seen.add(tagStr);
+    }
+    if (detail.voice_content && detail.voice_content !== '无') {
+      const v = `配音: ${detail.voice_content}`;
+      if (!seen.has(v)) { parts.push(v); seen.add(v); }
+    }
+    if (detail.motion && detail.motion !== '无') {
+      const m = `运镜: ${detail.motion}`;
+      if (!seen.has(m)) { parts.push(m); seen.add(m); }
+    }
+    if (detail.color_tone && detail.color_tone !== '未知') {
+      const c = `色调: ${detail.color_tone}`;
+      if (!seen.has(c)) { parts.push(c); seen.add(c); }
+    }
+    if (detail.bgm_type && detail.bgm_type !== '无' && detail.bgm_type !== '未知') {
+      const b = `背景乐: ${detail.bgm_type}`;
+      if (!seen.has(b)) { parts.push(b); seen.add(b); }
+    }
 
     // ── Params ──
     const params: Record<string, unknown> = {};

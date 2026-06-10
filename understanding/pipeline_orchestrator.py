@@ -543,6 +543,23 @@ class Pipeline:
         except Exception as exc:
             _log.debug("Creative deconstruction skipped: %s", exc)
 
+        # ── Extract video metadata from source file ──
+        try:
+            import cv2
+            cap = cv2.VideoCapture(video_path)
+            if cap.isOpened():
+                signal_data["video_width"] = int(cap.get(cv2.CAP_PROP_FRAME_WIDTH))
+                signal_data["video_height"] = int(cap.get(cv2.CAP_PROP_FRAME_HEIGHT))
+                signal_data["video_fps"] = round(cap.get(cv2.CAP_PROP_FPS), 2)
+                fourcc = int(cap.get(cv2.CAP_PROP_FOURCC))
+                if fourcc:
+                    codec_str = "".join(chr((fourcc >> 8 * i) & 0xFF) for i in range(4))
+                    signal_data["video_codec"] = codec_str.strip()
+                cap.release()
+        except Exception:
+            pass
+        signal_data["video_file_size"] = os.path.getsize(video_path)
+
         # Mark completed in job store
         if self._job_store and video_id:
             self._job_store.set_status(video_id, "completed")
@@ -708,16 +725,21 @@ class Pipeline:
             for kind, fn in opencv_tasks:
                 timeout = FRAME_DIFF_SOFT_TIMEOUT if kind == "diff" else SCENE_DETECT_SOFT_TIMEOUT
                 task_label = "frame_diff" if kind == "diff" else "scene_detect"
+                pool = concurrent.futures.ThreadPoolExecutor(max_workers=1)
                 try:
-                    with concurrent.futures.ThreadPoolExecutor(max_workers=1) as pool:
-                        f = pool.submit(fn)
-                        r = f.result(timeout=timeout)
-                        if r is not None:
-                            self._merge_signal_result(results, kind, r[1] if len(r) > 1 else None, r)
+                    f = pool.submit(fn)
+                    r = f.result(timeout=timeout)
+                    if r is not None:
+                        self._merge_signal_result(results, kind, r[1] if len(r) > 1 else None, r)
                 except concurrent.futures.TimeoutError:
                     _log.error("%s timed out after %ds — skipping", task_label, timeout)
                 except Exception:
                     _log.exception("%s crashed — skipping", task_label)
+                finally:
+                    # CRITICAL: shutdown(wait=False) prevents deadlock.
+                    # If the task timed out, the thread is still running but
+                    # we must NOT block the with-statement shutdown.
+                    pool.shutdown(wait=False)
 
             # ── Run non-OpenCV tasks in parallel with per-task timeout ──
             if other_tasks:

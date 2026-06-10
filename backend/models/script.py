@@ -46,6 +46,8 @@ class Module(BaseModel):
     extra_params: Optional[Dict[str, Any]] = None
     children: List["Module"] = []
     detail: Optional[Dict[str, Any]] = None
+    contained_transcript: Optional[List[str]] = None
+    contained_ocr: Optional[List[str]] = None
 
 
 class Track(BaseModel):
@@ -105,8 +107,9 @@ class AnalysisResponse(BaseModel):
     """Response from analysis endpoint."""
 
     video_id: str
-    status: Literal["processing", "completed", "failed"] = "processing"
+    status: Literal["processing", "completed", "failed", "partial"] = "processing"
     script: Optional[MigratableScript] = None
+    creative_pattern: Optional[Dict[str, Any]] = None
     error: Optional[str] = None
 
 

@@ -13,6 +13,7 @@ def assemble_result(
     structure_segments: List[dict],
     module_tree: List[Dict[str, Any]],
     job_id: Optional[str] = None,
+    creative_pattern: Optional[Dict[str, Any]] = None,
 ) -> Dict[str, Any]:
     """Assemble the final analysis result dict.
 
@@ -22,10 +23,11 @@ def assemble_result(
         structure_segments: Narrative structure segments.
         module_tree: Typed module list for script building.
         job_id: Optional job identifier for store integration.
+        creative_pattern: Optional creative deconstruction output (6 dimensions).
 
     Returns:
-        Dict with keys: signal_data, keyframes, structure, module_tree.
-        (job_id if provided.)
+        Dict with keys: signal_data, keyframes, structure, module_tree,
+        and creative_pattern (if provided).
     """
     result: Dict[str, Any] = {
         "signal_data": signal_data,
@@ -35,4 +37,6 @@ def assemble_result(
     }
     if job_id:
         result["job_id"] = job_id
+    if creative_pattern is not None:
+        result["creative_pattern"] = creative_pattern
     return result

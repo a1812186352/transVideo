@@ -63,17 +63,17 @@ interface Transition {
 }
 
 const UPLOAD_TRANSITIONS: Transition[] = [
-  { from: ['idle', 'error'],         to: 'uploading' },
+  { from: ['idle', 'error', 'done'],  to: 'uploading' },
   { from: ['uploading'],             to: 'done' },
   { from: ['uploading'],             to: 'error' },
   { from: ['done', 'error'],         to: 'idle' },
 ];
 
 const ANALYSIS_TRANSITIONS: Transition[] = [
-  { from: ['idle', 'failed'],        to: 'processing' },
-  { from: ['processing'],            to: 'completed' },
-  { from: ['processing'],            to: 'failed' },
-  { from: ['completed', 'failed'],   to: 'idle' },
+  { from: ['idle', 'failed', 'completed'], to: 'processing' },
+  { from: ['processing'],                 to: 'completed' },
+  { from: ['processing'],                 to: 'failed' },
+  { from: ['completed', 'failed'],        to: 'idle' },
 ];
 
 const EXPORT_TRANSITIONS: Transition[] = [
@@ -156,6 +156,23 @@ export const useProjectStore = defineStore('project', () => {
   function setLlmApiUrl(u: string) { llmApiUrl.value = u; persist('llmApiUrl', u); }
   function setModelName(n: string) { modelName.value = n; persist('modelName', n); }
   function setError(m: string | null) { errorMessage.value = m; }
+  function resetProject() {
+    videoId.value = null;
+    uploadStatus.value = 'idle';
+    analysisStatus.value = 'idle';
+    exportStatus.value = 'idle';
+    errorMessage.value = null;
+    metadata.value = {
+      title: '未命名项目', description: '', author: '',
+      created_at: new Date().toISOString(), total_duration: 0, source_video_id: '',
+      fps: 30, resolution: { width: 1920, height: 1080 }, tags: [],
+    };
+    SS.clear('videoId');
+    SS.clear('uploadStatus');
+    SS.clear('analysisStatus');
+    SS.clear('exportStatus');
+  }
+
   function clearError() { errorMessage.value = null; }
 
   // Persist config watches
@@ -171,6 +188,7 @@ export const useProjectStore = defineStore('project', () => {
   return {
     metadata, videoId, uploadStatus, analysisStatus, exportStatus,
     apiBaseUrl, llmApiKey, llmApiUrl, modelName, errorMessage,
+    resetProject,
     setMetadata, setVideoId,
     setUploadStatus, setAnalysisStatus, setExportStatus,
     setApiBaseUrl, setLlmApiKey, setLlmApiUrl, setModelName,

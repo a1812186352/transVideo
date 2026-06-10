@@ -87,7 +87,7 @@ def build_module_tree(
 
     for i, seg in enumerate(structure_segments):
         seg_type = seg.get("structure_type", "unclassified")
-        seg_label = seg.get("label", f"segment_{i}")
+        seg_label = seg.get("label", f"片段{i + 1}")
         start_time = seg.get("start_time", 0.0)
         end_time = seg.get("end_time", start_time)
         duration = max(end_time - start_time, 0.0)
@@ -189,6 +189,28 @@ def build_module_tree(
 
     # ── Dedup: merge redundant video_segment + effect pairs ──
     modules = deduplicate_modules(modules)
+
+    # ── ModuleDescriber: synthesise human-readable descriptions ──
+    try:
+        from understanding.deconstruction.module_describer import describe
+        for i, mod in enumerate(modules):
+            desc = describe(mod, index=i, total_count=len(modules))
+            detail = mod.get("detail") or {}
+            detail["semantic_label"] = desc["semantic_label"]
+            detail["description"] = desc["description"]
+            detail["time_range"] = desc["time_range"]
+            mod["detail"] = detail
+    except Exception as exc:
+        import logging
+        logging.getLogger(__name__).warning("Module describer failed: %s", exc)
+
+    # ── ModuleNormalizer: remove overlaps + fill gaps + describe content ──
+    try:
+        from understanding.deconstruction.module_normalizer import normalize
+        modules = normalize(modules, total_duration=dur_total)
+    except Exception as exc:
+        import logging
+        logging.getLogger(__name__).warning("Module normalizer failed: %s", exc)
 
     return modules
 

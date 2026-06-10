@@ -39,6 +39,8 @@ _analysis_semaphore = threading.Semaphore(1)
 
 # Per-video_id SSE queues — keyed by video_id, removed after analysis completes
 _streams: Dict[str, queue.Queue] = {}
+# ═══ Cancel flags: set to signal background thread to abort ═══
+_cancel_flags: Dict[str, threading.Event] = {}
 
 
 def _find_video(video_id: str) -> str:
@@ -61,13 +63,31 @@ def _push_event(video_id: str, event: dict) -> None:
 def _run_analysis_streaming(video_id: str, video_path: str, video_type: str = "vlog") -> None:
     """Run pipeline in a background thread, push events to SSE queue."""
     _log.info("Analysis thread started for %s (type=%s)", video_id, video_type)
+
+    # ═══ Early exit if cancel was requested before pipeline started ═══
+    flag = _cancel_flags.get(video_id)
+    if flag and flag.is_set():
+        _log.info("Analysis %s canceled before pipeline start", video_id)
+        return
+
     t0 = time.time()
     try:
+        # ═══ Check cancel at each stage ═══
+        if flag and flag.is_set():
+            _log.info("Analysis %s canceled — skipping pipeline", video_id)
+            return
+
         pipeline = Pipeline(
             work_dir=os.path.dirname(video_path),
             on_progress=lambda tag, msg: _push_event(video_id, {"type": "progress", "tag": tag, "msg": msg}),
         )
         result = pipeline.analyze_video(video_path, video_id=video_id, video_type=video_type)
+
+        # ═══ Check cancel after pipeline completes (user may have canceled during run) ═══
+        if flag and flag.is_set():
+            _log.info("Analysis %s canceled after pipeline — skipping result storage", video_id)
+            return
+
         _log.info("Pipeline done for %s, modules: %d", video_id, len(result.get("module_tree", [])))
 
         module_tree = result.get("module_tree", [])
@@ -93,9 +113,16 @@ def _run_analysis_streaming(video_id: str, video_path: str, video_type: str = "v
             source_video_id=video_id,
         )
 
+        # ── Extract creative_pattern from pipeline result ──
+        creative_pattern = result.get("creative_pattern")
+
         elapsed = round(time.time() - t0, 2)
         # Persist result via new JobStore API
-        _jobs.set_result(video_id, {"script": script if isinstance(script, dict) else script.model_dump()})
+        # script is already a dict (from_module_tree returns dict, not Pydantic model)
+        store_payload: dict = {"script": script if isinstance(script, dict) else script.model_dump()}
+        if creative_pattern:
+            store_payload["creative_pattern"] = creative_pattern
+        _jobs.set_result(video_id, store_payload)
         _push_event(video_id, {"type": "done", "total": len(module_tree), "elapsed": elapsed})
 
     except AnalysisError:
@@ -109,10 +136,13 @@ def _run_analysis_streaming(video_id: str, video_path: str, video_type: str = "v
         _push_event(video_id, {"type": "error", "message": str(e)})
     finally:
         # Release global concurrency guard so next job can start
-        try:
-            _analysis_semaphore.release()
-        except ValueError:
-            pass  # semaphore already released (shouldn't happen)
+        # Skip if cancel already released it (DELETE /analyze/{id})
+        skip = _cancel_flags.get(video_id, threading.Event())
+        if not skip.is_set():
+            try:
+                _analysis_semaphore.release()
+            except ValueError:
+                pass
 
 
 # ── REST endpoints (keep existing) ──
@@ -145,8 +175,9 @@ async def analyze_video(
             status="processing",
         )
 
-        # Create thread-safe queue for SSE events
+        # Create thread-safe queue for SSE events + cancel flag
         _streams[video_id] = queue.Queue()
+        _cancel_flags[video_id] = threading.Event()
 
         # Run analysis in separate thread so it doesn't block the event loop
         import concurrent.futures
@@ -159,6 +190,27 @@ async def analyze_video(
     return AnalysisResponse(video_id=video_id, status="processing")
 
 
+@router.delete("/{video_id}")
+async def cancel_analysis(video_id: str) -> AnalysisResponse:
+    """Cancel a running analysis."""
+    # Signal background thread to abort
+    flag = _cancel_flags.get(video_id)
+    if flag:
+        flag.set()
+    # Close SSE stream — frontend will get disconnected
+    q = _streams.pop(video_id, None)
+    if q is not None:
+        q.put({"type": "canceled"})
+    # Reset job status
+    _jobs.set_status(video_id, "canceled")
+    # Release global concurrency guard so next analysis can start immediately
+    try:
+        _analysis_semaphore.release()
+    except ValueError:
+        pass  # semaphore wasn't acquired (shouldn't happen)
+    return AnalysisResponse(video_id=video_id, status="canceled")
+
+
 @router.get("/{video_id}", response_model=AnalysisResponse)
 async def get_analysis_status(video_id: str) -> AnalysisResponse:
     job = _jobs.get_job(video_id)
@@ -167,15 +219,18 @@ async def get_analysis_status(video_id: str) -> AnalysisResponse:
 
     status = job.get("status", "unknown")
     script_dict = None
+    creative_pattern = None
 
-    # Script is stored inside the result field
+    # Script and creative pattern are stored inside the result field
     result = job.get("result", {})
     if isinstance(result, dict):
         script_dict = result.get("script")
+        creative_pattern = result.get("creative_pattern")
 
     script = MigratableScript(**script_dict) if script_dict else None
     return AnalysisResponse(
-        video_id=video_id, status=status, script=script, error=job.get("error"),
+        video_id=video_id, status=status, script=script,
+        creative_pattern=creative_pattern, error=job.get("error"),
     )
 
 

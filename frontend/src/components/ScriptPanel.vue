@@ -1,12 +1,5 @@
 <template>
   <div class="spanel">
-    <div class="spanel__header">
-      <span class="spanel__title">脚本预览</span>
-      <span class="spanel__count" v-if="timeline.modules.length">
-        {{ timeline.modules.length }} 个模块
-      </span>
-    </div>
-
     <!-- Block list -->
     <div class="spanel__list" v-if="blocks.length">
       <div
@@ -69,27 +62,6 @@ const fmtHMS = (s: number): string => {
   flex-direction: column;
   height: 100%;
   overflow: hidden;
-}
-
-.spanel__header {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  padding: 8px 12px;
-  border-bottom: 1px solid var(--border);
-  flex-shrink: 0;
-}
-.spanel__title {
-  font-size: 12px;
-  font-weight: 600;
-  color: var(--text-secondary);
-  text-transform: uppercase;
-  letter-spacing: 0.3px;
-}
-.spanel__count {
-  font-size: 11px;
-  color: var(--text-muted);
-  font-family: var(--font-mono);
 }
 
 .spanel__list {

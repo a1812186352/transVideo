@@ -9,29 +9,27 @@
       </select>
     </div>
 
-    <!-- ═══ Text replacer toggle ═══ -->
+    <!-- ═══ Analyze button + cancel ═══ -->
     <div class="prop-analyze" v-if="store.videoId">
-      <button class="prop-repl-btn" @click="showTextReplacer = !showTextReplacer">
-        🔤 批量替换文本
-      </button>
-    </div>
-
-    <!-- ═══ Analyze button ═══ -->
-    <div class="prop-analyze" v-if="store.videoId">
-      <button
-        class="prop-analyze-btn"
-        :class="{
-          'prop-analyze-btn--processing': store.analysisStatus === 'processing',
-          'prop-analyze-btn--done': store.analysisStatus === 'completed',
-          'prop-analyze-btn--fail': store.analysisStatus === 'failed',
-        }"
-        :disabled="store.analysisStatus === 'processing'"
-        @click="ws.handleAnalyze()"
-      >
-        <template v-if="store.analysisStatus === 'idle' || store.analysisStatus === 'failed'">▶ 开始分析</template>
-        <template v-else-if="store.analysisStatus === 'processing'">分析中…</template>
-        <template v-else-if="store.analysisStatus === 'completed'">✓ 分析完成</template>
-      </button>
+      <div class="prop-analyze-row">
+        <button
+          class="prop-analyze-btn"
+          :class="{
+            'prop-analyze-btn--processing': store.analysisStatus === 'processing',
+            'prop-analyze-btn--done': store.analysisStatus === 'completed',
+            'prop-analyze-btn--fail': store.analysisStatus === 'failed',
+          }"
+          :disabled="store.analysisStatus === 'processing'"
+          @click="ws.handleAnalyze()"
+        >
+          <template v-if="store.analysisStatus === 'idle' || store.analysisStatus === 'failed'">▶ 开始分析</template>
+          <template v-else-if="store.analysisStatus === 'processing'">分析中…</template>
+          <template v-else-if="store.analysisStatus === 'completed'">✓ 分析完成</template>
+        </button>
+        <button v-if="store.analysisStatus === 'processing'" class="prop-cancel-btn" @click="ws.cancelAnalysis()">
+          ⏹ 停止
+        </button>
+      </div>
     </div>
 
     <div class="prop__body" v-if="selectedModule">
@@ -134,7 +132,8 @@
   </div>
 
 
-  <!-- ═══ 创作特征 — Deconstructor 全片维度分析 ═══ -->
+  <!-- ═══ 创作特征 — 已迁移至 AnalysisResultPanel ═══ -->
+  <!--
   <div class="prop-creative" v-if="creative">
     <div class="prop-group">
       <div class="prop-group__head" @click="toggleCreative = !toggleCreative">
@@ -206,13 +205,7 @@
       </div>
     </div>
   </div>
-
-    <!-- ═══ Text Replacer overlay ═══ -->
-    <Teleport to="body">
-      <div v-if="showTextReplacer" class="prop-overlay" @click.self="showTextReplacer = false">
-        <TextReplacer @close="showTextReplacer = false" />
-      </div>
-    </Teleport>
+  -->
 </template>
 
 <script setup lang="ts">
@@ -221,7 +214,6 @@ import { useProjectStore } from '../stores/project';
 import { useTimelineStore } from '../stores/timelineStore';
 import { usePlaybackStore } from '../stores/playbackStore';
 import { useWorkbenchStore } from '../stores/workbench';
-import TextReplacer from "./TextReplacer.vue";
 import AudioWaveform from './AudioWaveform.vue';
 
 const store = useProjectStore();
@@ -229,8 +221,8 @@ const timeline = useTimelineStore();
 const playback = usePlaybackStore();
 const ws = useWorkbenchStore();
 
-const showTextReplacer = ref(false);
-const toggleCreative = ref(false);
+// 【已迁移至 AnalysisResultPanel】
+// const toggleCreative = ref(false);
 
 const groups = reactive({
   scene: true, visual: true, color: true, audio: true, text: true, voice: true,
@@ -382,6 +374,13 @@ const energyBars = computed(() => {
 .prop-analyze-btn--processing { background: var(--bg-surface); color: var(--text-primary); border: 1px solid var(--border); }
 .prop-analyze-btn--done { background: var(--bg-surface); color: var(--accent); border: 1px solid var(--accent); cursor: default; }
 .prop-analyze-btn--fail { background: #da3633; }
+.prop-analyze-row { display: flex; gap: 6px; }
+.prop-cancel-btn {
+  padding: 6px 12px; border: 1px solid var(--border); border-radius: var(--radius-sm);
+  background: var(--bg-surface); color: var(--text-muted); font-size: 12px; cursor: pointer;
+  white-space: nowrap; transition: all var(--transition);
+}
+.prop-cancel-btn:hover { border-color: #da3633; color: #da3633; }
 
 /* ── Body ── */
 .prop__body { flex: 1; overflow-y: auto; padding: 6px 10px; scrollbar-width: thin; scrollbar-color: var(--border) transparent; }
@@ -400,8 +399,8 @@ const energyBars = computed(() => {
 .prop-group__body { padding: 0 8px 8px; }
 
 /* ── Tags ── */
-.prop-tags { display: flex; flex-wrap: wrap; gap: 4px; }
-.prop-tag { padding: 2px 8px; font-size: 11px; background: var(--accent-subtle); color: var(--accent); border-radius: 10px; font-weight: 500; }
+.prop-tags { display: flex; flex-wrap: wrap; gap: 6px; }
+.prop-tag { padding: 3px 10px; font-size: 11px; background: var(--accent-subtle); color: var(--accent); border-radius: 10px; font-weight: 500; flex-shrink: 0; min-width: 48px; text-align: center; }
 
 /* ── Row ── */
 .prop-row { font-size: 12px; padding: 2px 0; color: var(--text-secondary); display: flex; align-items: center; gap: 6px; }
@@ -455,17 +454,6 @@ const energyBars = computed(() => {
 }
 .badge--large { background: var(--accent-subtle); color: var(--accent); font-weight: 600; }
 .badge--small { opacity: 0.6; }
-
-.prop-repl-btn {
-  width: 100%; padding: 5px 0; border: 1px solid var(--border); border-radius: var(--radius-sm);
-  background: var(--bg-surface); color: var(--text-secondary); font-size: 11px;
-  cursor: pointer; transition: all var(--transition);
-}
-.prop-repl-btn:hover { border-color: var(--accent); color: var(--accent); }
-.prop-overlay {
-  position: fixed; inset: 0; z-index: 2000;
-  background: rgba(0,0,0,0.45); display: flex; align-items: center; justify-content: center;
-}
 
 .prop-creative { border-top: 1px solid var(--border); flex-shrink: 0; }
 .prop-dense-title { font-size: 10px; font-weight: 600; color: var(--text-muted); text-transform: uppercase; letter-spacing: 0.3px; padding: 6px 0 2px; }
