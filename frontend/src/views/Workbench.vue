@@ -161,7 +161,7 @@
               <span>{{ blueprint ? '生成蓝图' : '生成预览' }}</span>
               <span v-if="blueprintLoading" class="mg-panel__badge">加载中…</span>
               <span v-else-if="blueprint" class="mg-panel__badge">
-                {{ blueprint.template.label }} · {{ blueprint.summary.block_count }} 模块
+                {{ blueprint?.template?.label || '—' }} · {{ blueprint?.summary?.block_count ?? 0 }} 模块
               </span>
               <span v-else class="mg-panel__badge" :class="{ 'mg-panel__badge--danger': gapCount > 0 }">
                 {{ gapCount > 0 ? `${gapCount} 缺口` : '素材充足' }}
@@ -175,7 +175,7 @@
                      :class="'blueprint-block--' + b.status"
                      :style="{ flex: b.duration || 1 }">
                   <span class="blueprint-block__name">{{ b.name }}</span>
-                  <span class="blueprint-block__time">{{ b.start_time.toFixed(1) }}-{{ (b.start_time + b.duration).toFixed(1) }}s</span>
+                  <span class="blueprint-block__time">{{ formatBlockTime(b) }}</span>
                   <span class="blueprint-block__badge">{{ statusLabelBP(b.status) }}</span>
                 </div>
                 <div v-if="blueprint.summary.required_missing?.length" class="blueprint-warn">
@@ -282,12 +282,26 @@ const TEMPLATE_ID_MAP: Record<string, string> = {
 
 // ── Blueprint state ──
 import type { BlueprintResult } from '../types/script';
+const toastMsg = ref('');
+let toastTimer: ReturnType<typeof setTimeout> | null = null;
+function showToast(msg: string) {
+  toastMsg.value = msg;
+  if (toastTimer) clearTimeout(toastTimer);
+  toastTimer = setTimeout(() => { toastMsg.value = ''; }, 4000);
+}
+
 const blueprint = ref<BlueprintResult | null>(null);
 const blueprintLoading = ref(false);
 
 function statusLabelBP(s: string): string {
   const m: Record<string, string> = { matched: '✅', missing: '⚠', passthrough: '⬡' };
   return m[s] || s;
+}
+
+function formatBlockTime(b: { start_time?: number; duration?: number }): string {
+  const start = typeof b.start_time === 'number' ? b.start_time : 0;
+  const dur = typeof b.duration === 'number' ? b.duration : 0;
+  return `${start.toFixed(1)}-${(start + dur).toFixed(1)}s`;
 }
 
 async function onMigrate() {
@@ -303,9 +317,17 @@ async function onMigrate() {
     });
     if (!res.ok) throw new Error(`HTTP ${res.status}`);
     blueprint.value = await res.json();
+    if (!blueprint.value?.blocks || blueprint.value.blocks.length === 0) {
+      showToast('分析结果尚未就绪，请先完成分析');
+      blueprint.value = null;
+      return;
+    }
     migrationSteps.value[2].done = true;
     migrationSteps.value[3].done = false;
-  } catch (e) { console.warn('Blueprint merge failed:', e); }
+  } catch (e) {
+    showToast('结构迁移失败: ' + ((e as any)?.message || '请检查后端是否运行'));
+    console.warn('Blueprint merge failed:', e);
+  }
   finally { blueprintLoading.value = false; }
 }
 
@@ -655,6 +677,14 @@ function onPreviewUpload(file: File) {
 }
 .migration__logo { font-weight: 700; font-size: 15px; letter-spacing: -0.5px; white-space: nowrap; }
 .migration__logo-accent { color: var(--accent); }
+.toast {
+  position: fixed; bottom: 80px; left: 50%; transform: translateX(-50%);
+  background: #da3633; color: #fff; padding: 8px 20px; border-radius: var(--radius-sm);
+  font-size: 12px; z-index: 9999; box-shadow: 0 4px 12px rgba(0,0,0,0.3);
+  animation: toast-in 0.2s ease;
+}
+@keyframes toast-in { from { opacity:0; transform: translateX(-50%) translateY(10px); } to { opacity:1; transform: translateX(-50%) translateY(0); } }
+
 .mg-btn--clear {
   background: transparent;
   border: 1px solid var(--border);
