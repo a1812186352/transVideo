@@ -41,6 +41,8 @@ _analysis_semaphore = threading.Semaphore(1)
 _streams: Dict[str, queue.Queue] = {}
 # ═══ Cancel flags: set to signal background thread to abort ═══
 _cancel_flags: Dict[str, threading.Event] = {}
+# Per-video_id sent index — tracks how many events already consumed by SSE
+_sent_counts: Dict[str, int] = {}
 
 
 def _find_video(video_id: str) -> str:

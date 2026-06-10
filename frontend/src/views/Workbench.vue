@@ -99,7 +99,7 @@
           <div class="mg-panel mg-panel--analysis">
             <div class="mg-panel__header">
               <span>结构解析结果</span>
-              <span class="mg-panel__badge">5 类 · 11 段</span>
+              <span class="mg-panel__badge">{{ analysisModules.length }} 段</span>
             </div>
             <div class="mg-panel__body">
               <VideoMetaPanel
@@ -185,7 +185,7 @@
               <div v-else-if="blueprintLoading" class="gen-preview-placeholder">生成蓝图中…</div>
               <div v-else>
                 <GenerationPreview
-                  :slots="genSlots"
+                  :slots="genSlotsDynamic"
                   @remove-slot="onRemoveGenSlot"
                   @fill-slot="onFillGenSlot"
                 />
@@ -328,7 +328,7 @@ const analysisModules = computed<ScriptModule[]>(() => {
       name: d.semantic_label || mod.label || mod.type,
       startTime: mod.start_time,
       endTime: mod.start_time + mod.duration,
-      description: d.description || buildModuleDesc(mod),
+      description: cleanDescription(d.description || buildModuleDesc(mod)),
       type: mapModuleType(mod.type, mod.detail),
       // Pass raw detail fields for expandable technical view
       motion: d.motion,
@@ -342,6 +342,70 @@ const analysisModules = computed<ScriptModule[]>(() => {
     };
   });
 });
+
+/**
+ * Clean raw module description: deduplicate, remove technical prefixes,
+ * convert params to natural language.
+ */
+function cleanDescription(raw: string): string {
+  if (!raw || raw === '—') return '—';
+
+  let desc = raw.trim();
+
+  // 1. Deduplicate: if halves are identical (e.g. "A B A B"), keep only first half
+  const mid = Math.floor(desc.length / 2);
+  let splitPoint = mid;
+  for (let i = mid; i >= 0; i--) {
+    if (desc[i] === ' ') { splitPoint = i; break; }
+  }
+  if (splitPoint > 0) {
+    const left = desc.substring(0, splitPoint).trim();
+    const right = desc.substring(splitPoint).trim();
+    if (left && left === right) desc = left;
+  }
+
+  // 2. Strip transition/effect type prefixes (type already shown by colored dot)
+  desc = desc
+    .replace(/^硬切[·\s]*/, '')
+    .replace(/^闪切插入[·\s]*/, '')
+    .replace(/^同步淡出[·\s]*/, '')
+    .replace(/^交叉溶解[·\s]*/, '')
+    .replace(/^淡入淡出[·\s]*/, '')
+    .replace(/^黑场过渡[·\s]*/, '')
+    .replace(/^白场过渡[·\s]*/, '')
+    .replace(/^划像[·\s]*/, '')
+    .replace(/^叠化[·\s]*/, '');
+
+  // 3. Convert technical terms → natural language
+  desc = desc.replace(/静止定镜/g, '画面静止');
+  desc = desc.replace(/镜头拉远\s*[（(]\s*缩小\s*[xX×]\s*([\d.]+)\s*[）)]/g,
+    (_: string, val: string) => parseFloat(val) > 2 ? '镜头快速拉远' : '镜头拉远');
+  desc = desc.replace(/镜头推进\s*[（(]\s*放大\s*[xX×]\s*([\d.]+)\s*[）)]/g,
+    (_: string, val: string) => parseFloat(val) > 2 ? '镜头快速推进' : '镜头推进');
+  desc = desc.replace(/缩放\s*[×xX]\s*([\d.]+)/g, (_: string, val: string) => {
+    const n = parseFloat(val);
+    if (n < 0.95) return '镜头快速拉远';
+    if (n > 1.05) return '镜头快速推进';
+    return '轻微缩放';
+  });
+  desc = desc.replace(/画面右移/g, '画面向右移动');
+  desc = desc.replace(/画面左移/g, '画面向左移动');
+  desc = desc.replace(/画面上移/g, '画面向上移动');
+  desc = desc.replace(/画面下移/g, '画面向下移动');
+
+  // 4. Strip trailing technical numeric params (no semantic value for user)
+  desc = desc.replace(/\s*\|\s*位移\s*[-+]?\d+\.?\d*\s*(?:px|%)?/g, '');
+  desc = desc.replace(/\s*\|\s*光流\s*\d+\.?\d*/g, '');
+  desc = desc.replace(/\s*\|\s*旋转\s*[-+]?\d+\.?\d*°/g, '');
+
+  // Clean up: collapse spaces, trim orphan separators
+  desc = desc.replace(/\s+/g, ' ').trim();
+  desc = desc.replace(/^\s*\|\s*/, '').replace(/\s*\|\s*$/, '');
+  // Replace internal pipe separators with readable comma
+  desc = desc.replace(/\s*\|\s*/g, '、');
+
+  return desc || '—';
+}
 
 function mapModuleType(modType: string, detail?: Record<string, any>): 'opening' | 'highlight' | 'transition' | 'closing' | 'effect' {
   const m: Record<string, string> = {
@@ -403,60 +467,58 @@ function onSeek(time: number) {
 
 
 // ── Material slots ──
-const materialSlots = ref<Array<{ id: string; label: string; file: File | null; tags: string[] }>>([
-  { id: '1', label: '槽位 1', file: null, tags: [] },
-  { id: '2', label: '槽位 2', file: null, tags: [] },
-  { id: '3', label: '槽位 3', file: null, tags: [] },
-  { id: '4', label: '槽位 4', file: null, tags: [] },
-  { id: '5', label: '槽位 5', file: null, tags: [] },
-]);
+const materialSlots = computed(() => {
+  const count = analysisModules.value.length || 5;
+  return Array.from({ length: count }, (_, i) => ({
+    id: String(i + 1),
+    label: `槽位 ${i + 1}`,
+    file: null as File | null,
+    tags: [] as string[],
+  }));
+});
 const filledSlotCount = computed(() => materialSlots.value.filter(s => s.file).length);
 
-// ── Generation preview slots (reactive) ──
-const genSlots = ref([
-  { name: '标题卡',   startPercent: 0,  widthPercent: 10, status: 'filled' as const },
-  { name: '人物引入', startPercent: 10, widthPercent: 12, status: 'filled' as const },
-  { name: '动作高燃', startPercent: 22, widthPercent: 18, status: 'filled' as const },
-  { name: '商品特写', startPercent: 40, widthPercent: 10, status: 'gap' as const },
-  { name: '台词金句', startPercent: 50, widthPercent: 12, status: 'filled' as const },
-  { name: '对比',     startPercent: 62, widthPercent: 8,  status: 'fallback' as const },
-  { name: '视觉爆发', startPercent: 70, widthPercent: 14, status: 'filled' as const },
-  { name: 'CTA',      startPercent: 84, widthPercent: 8,  status: 'filled' as const },
-  { name: '品牌露出', startPercent: 92, widthPercent: 8,  status: 'filled' as const },
-]);
+// ── Generation preview slots (derived from analysisModules) ──
+const removedSlotIndices = ref(new Set<number>());
+const slotStatusOverrides = ref<Record<number, 'filled' | 'gap' | 'fallback'>>({});
 
-const gapCount = computed(() => genSlots.value.filter(s => s.status === 'gap' || s.status === 'fallback').length);
-const fillCount = computed(() => genSlots.value.filter(s => s.status === 'filled').length);
-const coveragePercent = computed(() => Math.round((fillCount.value / genSlots.value.length) * 100));
+const genSlotsDynamic = computed<Array<{ name: string; startPercent: number; widthPercent: number; status: 'filled' | 'gap' | 'fallback'; _origIdx: number }>>(() => {
+  const mods = analysisModules.value;
+  const total = totalDuration.value || 1;
+  if (!mods.length) return [];
+  return mods
+    .map((mod, i) => ({
+      name: mod.name,
+      startPercent: Math.round((mod.startTime / total) * 100),
+      widthPercent: Math.max(1, Math.round(((mod.endTime - mod.startTime) / total) * 100)),
+      status: slotStatusOverrides.value[i] || ('filled' as const),
+      _origIdx: i,
+    }))
+    .filter(s => !removedSlotIndices.value.has(s._origIdx));
+});
+
+const gapCount = computed(() => genSlotsDynamic.value.filter(s => s.status === 'gap' || s.status === 'fallback').length);
+const fillCount = computed(() => genSlotsDynamic.value.filter(s => s.status === 'filled').length);
+const coveragePercent = computed(() => {
+  const total = genSlotsDynamic.value.length;
+  return total ? Math.round((fillCount.value / total) * 100) : 0;
+});
 const estimatedDuration = computed(() => 28);
 
 function onRemoveGenSlot(index: number) {
-  genSlots.value.splice(index, 1);
-  // Recalculate percentages after removal
-  recalcSlotPercents();
-}
-
-function onFillGenSlot(index: number, fix: 'reuse' | 'fallback') {
-  const slot = genSlots.value[index];
-  if (!slot) return;
-  if (fix === 'reuse') {
-    slot.status = 'fallback';
-    slot.name = slot.name + ' (复用)';
-  } else {
-    slot.status = 'filled';
+  const slot = genSlotsDynamic.value[index];
+  if (slot !== undefined) {
+    removedSlotIndices.value = new Set([...removedSlotIndices.value, slot._origIdx]);
   }
 }
 
-function recalcSlotPercents() {
-  const total = genSlots.value.length;
-  if (total === 0) return;
-  const each = Math.floor(100 / total);
-  let acc = 0;
-  genSlots.value.forEach((s, i) => {
-    s.startPercent = acc;
-    s.widthPercent = i === total - 1 ? 100 - acc : each;
-    acc += s.widthPercent;
-  });
+function onFillGenSlot(index: number, fix: 'reuse' | 'fallback') {
+  const slot = genSlotsDynamic.value[index];
+  if (!slot) return;
+  slotStatusOverrides.value = {
+    ...slotStatusOverrides.value,
+    [slot._origIdx]: fix === 'reuse' ? 'fallback' : 'filled',
+  };
 }
 
 // ── AnalysisResultPanel demo data ──
