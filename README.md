@@ -31,6 +31,43 @@ transVideo 是一个视频叙事结构理解工具：输入任意视频，系统
   └─[生成层] ─── HyperFrames HTML 渲染 → FFmpeg 转码/字幕/拼接
 ```
 
+## 快速开始
+
+### 环境要求
+
+- Python 3.10+
+- Node.js 18+
+- FFmpeg（可选，用于视频导出）
+- Tesseract OCR（可选，用于文字识别）
+
+### 安装
+
+```bash
+# 后端依赖
+pip install -r requirements.txt
+
+# 前端依赖
+cd frontend && npm install
+```
+
+### 启动
+
+```powershell
+# 启动后端（项目根目录）
+uvicorn backend.main:app --reload --port 8001
+
+# 启动前端（另一个终端）
+cd frontend && npm run dev
+```
+
+浏览器打开 `http://localhost:5173`，上传视频 → 点击"开始分析" → 查看结果 → 编辑脚本 → 导出 MP4。
+
+> **端口调整**：后端默认 `8001`，前端默认 `5173`。如需更改：
+> - 后端：`uvicorn backend.main:app --reload --port <端口>`
+> - 前端：修改 `frontend/src/stores/project.ts` 中的 `apiBaseUrl` 默认值，或在前端设置面板中修改
+>
+> **注意**：Whisper（~2GB）和 YOLOv8n（~6MB）首次运行时会自动下载模型文件，需要联网。最小配置下（仅 opencv + scenedetect）无需下载即可运行帧差分析和结构推理。
+
 ## 整体 AI 架构
 
 ### 全本地推理管线（无外部依赖）
