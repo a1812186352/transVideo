@@ -874,6 +874,10 @@ def derive_visual_from_features(
     elif fl >= _push:
         motion = "画面运动"
         motion_label_code = "MOVE"
+    # Low flow but high histogram distance → visual change without camera motion
+    elif hd >= _hd_still * 2:
+        motion = "画面跳变"
+        motion_label_code = "CUT"
     else:
         motion = "静止定镜"
         motion_label_code = "STILL"
