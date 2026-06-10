@@ -25,6 +25,7 @@ export const useWorkbenchStore = defineStore('workbench', () => {
   const exportProgress = ref(0);
   const videoCurrentTime = ref(0);
   const analysisActualTime = ref('');
+  const analysisResult = ref<AnalysisResult | null>(null);
   const viewMode = ref<'list' | 'grid'>('list');
   const moduleScript = ref('');
   const showExportFmt = ref(false);
@@ -417,6 +418,7 @@ export const useWorkbenchStore = defineStore('workbench', () => {
       const finalRes = await fetch(`${base}/analyze/${project.videoId}`);
       if (!finalRes.ok) throw new Error(`获取分析结果失败: HTTP ${finalRes.status}`);
       const result: AnalysisResult = await finalRes.json();
+      analysisResult.value = result;
       if (result.script) {
         // 保留上传阶段更准确的元数据（cv2 实测分辨率/帧率，用户文件名）
         const prevMeta = project.metadata;
@@ -643,7 +645,7 @@ export const useWorkbenchStore = defineStore('workbench', () => {
   return {
     // UI state
     settingsOpen, dragOver, exportDownloadUrl, uploadFileSize, uploadFileName,
-    videoCurrentTime, analysisActualTime, viewMode, moduleScript, showExportFmt,
+    videoCurrentTime, analysisActualTime, analysisResult, viewMode, moduleScript, showExportFmt,
     exportResolution, exportBitrate, exportSubtitles, exportFormat, videoType, VIDEO_TYPE_OPTIONS,
     // Monitor
     monitorLogs, onMonitorScroll, pushLog, startMonitor, finishMonitor, stopMonitor,

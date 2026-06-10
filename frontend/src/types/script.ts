@@ -64,6 +64,8 @@ export interface Module {
   params?: ModuleParams;
   children: Module[];
   detail?: Record<string, any>;
+  contained_transcript?: string[];
+  contained_ocr?: string[];
 }
 
 /** A timeline track definition */
@@ -112,10 +114,44 @@ export interface StructureSegment {
 }
 
 /** Analysis result from the backend */
+export interface CreativePattern {
+  shot_rhythm?: {
+    avg_shot_duration?: number;
+    shot_count?: number;
+    rhythm_pattern?: string;
+    duration_distribution?: number[];
+  };
+  subtitle_style?: {
+    position_distribution?: Record<string, number>;
+    density?: number;
+    avg_appear_duration?: number;
+    top_positions?: string[];
+  };
+  visual_packaging?: {
+    dominant_color_style?: string;
+    color_palette?: string[];
+    composition_score?: string;
+    packaging_label?: string;
+  };
+  transition_pattern?: {
+    total_count?: number;
+    density?: number;
+    type_distribution?: Record<string, number>;
+    top_type?: string;
+  };
+  music_sync?: {
+    bpm?: number;
+    sync_density?: number;
+    music_structure?: string;
+    beat_timestamps?: number[];
+  };
+}
+
 export interface AnalysisResult {
   video_id: string;
   status: 'processing' | 'completed' | 'failed';
   script?: MigratableScript;
+  creative_pattern?: CreativePattern;
   error?: string;
 }
 

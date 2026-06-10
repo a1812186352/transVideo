@@ -133,6 +133,80 @@
     </div>
   </div>
 
+
+  <!-- ═══ 创作特征 — Deconstructor 全片维度分析 ═══ -->
+  <div class="prop-creative" v-if="creative">
+    <div class="prop-group">
+      <div class="prop-group__head" @click="toggleCreative = !toggleCreative">
+        创作特征 <span class="prop-group__arrow" :class="{ open: toggleCreative }">▼</span>
+      </div>
+      <div class="prop-group__body" v-show="toggleCreative">
+
+        <div class="prop-dense-title">镜头节奏</div>
+        <div v-if="creative.shot_rhythm?.shot_count != null" class="prop-creative__zone">
+          <div class="prop-row">节奏: <b>{{ creative.shot_rhythm.rhythm_pattern || '—' }}</b></div>
+          <div class="prop-row">镜头数: {{ creative.shot_rhythm.shot_count }}</div>
+          <div class="prop-row" v-if="creative.shot_rhythm.avg_shot_duration">平均: {{ creative.shot_rhythm.avg_shot_duration.toFixed(1) }}s</div>
+          <div v-if="creative.shot_rhythm.duration_distribution?.length" class="prop-hist">
+            <div v-for="(v, i) in creative.shot_rhythm.duration_distribution.slice(0,12)" :key="i"
+                 class="prop-hist__bar" :style="{ height: Math.max(4, v * 60) + 'px' }" />
+          </div>
+        </div>
+        <div v-else class="prop-row" style="color:var(--text-muted)">—</div>
+
+        <div class="prop-dense-title">字幕风格</div>
+        <div v-if="creative.subtitle_style?.available !== false && creative.subtitle_style" class="prop-creative__zone">
+          <div class="prop-row">密度: {{ creative.subtitle_style.density?.toFixed(2) || '—' }}</div>
+          <div class="prop-row" v-if="creative.subtitle_style.avg_appear_duration">平均时长: {{ creative.subtitle_style.avg_appear_duration.toFixed(1) }}s</div>
+          <div v-if="creative.subtitle_style.top_positions?.length" class="prop-tags" style="margin-top:2px">
+            <span v-for="p in creative.subtitle_style.top_positions" :key="p" class="prop-tag">{{ p }}</span>
+          </div>
+        </div>
+        <div v-else class="prop-row" style="color:var(--text-muted)">—</div>
+
+        <div class="prop-dense-title">视觉风格</div>
+        <div v-if="creative.visual_packaging?.available !== false && creative.visual_packaging" class="prop-creative__zone">
+          <div class="prop-row">主色调: <b>{{ creative.visual_packaging.dominant_color_style || '—' }}</b></div>
+          <div class="prop-row">构图: {{ creative.visual_packaging.composition_score || '—' }}</div>
+          <div class="prop-row" v-if="creative.visual_packaging.packaging_label">包装: {{ creative.visual_packaging.packaging_label }}</div>
+          <div v-if="creative.visual_packaging.color_palette?.length" class="prop-swatches" style="margin-top:4px">
+            <span v-for="(c, i) in creative.visual_packaging.color_palette" :key="i" class="prop-swatch" :style="{ background: c }" />
+          </div>
+        </div>
+        <div v-else class="prop-row" style="color:var(--text-muted)">—</div>
+
+        <div class="prop-dense-title">转场特征</div>
+        <div v-if="creative.transition_pattern?.available !== false && creative.transition_pattern" class="prop-creative__zone">
+          <div class="prop-row">总数: <b>{{ creative.transition_pattern.total_count || 0 }}</b></div>
+          <div class="prop-row">密度: {{ creative.transition_pattern.density?.toFixed(3) || '—' }}</div>
+          <div class="prop-row" v-if="creative.transition_pattern.top_type">主要: <b>{{ creative.transition_pattern.top_type }}</b></div>
+          <div v-if="creative.transition_pattern.type_distribution" class="prop-creative__table">
+            <div v-for="(v, k) in Object.entries(creative.transition_pattern.type_distribution)" :key="k" class="prop-creative__row">
+              <span class="prop-creative__cell">{{ k }}</span>
+              <span class="prop-creative__cell prop-creative__cell--right">{{ v }}</span>
+            </div>
+          </div>
+        </div>
+        <div v-else class="prop-row" style="color:var(--text-muted)">—</div>
+
+        <div class="prop-dense-title">音乐同步</div>
+        <div v-if="creative.music_sync?.available !== false && creative.music_sync" class="prop-creative__zone">
+          <div class="prop-row">BPM: <b>{{ creative.music_sync.bpm || '—' }}</b></div>
+          <div v-if="creative.music_sync.sync_density != null" class="prop-row">
+            <span>同步密度:</span>
+            <span class="sync-bar__track" style="display:inline-flex;width:60px;height:6px;background:var(--border);border-radius:3px;overflow:hidden;margin:0 4px">
+              <span class="sync-bar__fill" :style="{ width: (creative.music_sync.sync_density * 100) + '%', background: 'var(--accent)', height: '100%' }" />
+            </span>
+            <span>{{ (creative.music_sync.sync_density * 100).toFixed(0) }}%</span>
+          </div>
+          <div class="prop-row" v-if="creative.music_sync.music_structure">结构: <b>{{ creative.music_sync.music_structure }}</b></div>
+        </div>
+        <div v-else class="prop-row" style="color:var(--text-muted)">—</div>
+
+      </div>
+    </div>
+  </div>
+
     <!-- ═══ Text Replacer overlay ═══ -->
     <Teleport to="body">
       <div v-if="showTextReplacer" class="prop-overlay" @click.self="showTextReplacer = false">
@@ -156,15 +230,17 @@ const playback = usePlaybackStore();
 const ws = useWorkbenchStore();
 
 const showTextReplacer = ref(false);
+const toggleCreative = ref(false);
 
 const groups = reactive({
-  scene: true, visual: true, color: true, audio: true, text: true,
+  scene: true, visual: true, color: true, audio: true, text: true, voice: true,
 });
 function toggleGroup(key: keyof typeof groups) {
   groups[key] = !groups[key];
 }
 
 const selectedModule = computed(() => timeline.selectedModule);
+const creative = computed(() => (ws as any).analysisResult?.creative_pattern || null);
 
 // 兼容后端可能的字段名
 const detail = computed(() => {
@@ -216,6 +292,14 @@ function moodLabel(mood: string): string {
 
 /* ── 3d: OCR — prefer structured items, fallback to plain texts ── */
 interface OcrItem { text: string; sizeRank: string | null; lowConfidence: boolean }
+const transcriptLines = computed(() => {
+  const mod = selectedModule.value as any;
+  if (mod?.contained_transcript?.length) return mod.contained_transcript;
+  const d = detail.value;
+  if (d?.voice_content && d.voice_content !== '无') return [d.voice_content];
+  return [];
+});
+
 const ocrItems = computed<OcrItem[]>(() => {
   const d = detail.value;
   // 优先读取结构化字段
@@ -383,5 +467,22 @@ const energyBars = computed(() => {
   background: rgba(0,0,0,0.45); display: flex; align-items: center; justify-content: center;
 }
 
+.prop-creative { border-top: 1px solid var(--border); flex-shrink: 0; }
+.prop-dense-title { font-size: 10px; font-weight: 600; color: var(--text-muted); text-transform: uppercase; letter-spacing: 0.3px; padding: 6px 0 2px; }
+.prop-creative__zone { padding: 2px 0 6px; }
+.prop-creative__table { display: flex; flex-direction: column; gap: 1px; margin-top: 4px; }
+.prop-creative__row { display: flex; justify-content: space-between; font-size: 11px; padding: 1px 0; }
+.prop-creative__cell { color: var(--text-secondary); }
+.prop-creative__cell--right { font-family: var(--font-mono); color: var(--text-muted); }
+.prop-hist { display: flex; align-items: flex-end; gap: 2px; height: 40px; margin-top: 4px; }
+.prop-hist__bar { width: 8px; border-radius: 2px 2px 0 0; background: var(--accent); opacity: 0.7; min-height: 4px; }
+.sync-bar__track { width: 60px; height: 6px; }
+.prop-muted { color: var(--text-muted); }
+.prop-voice { max-height: 120px; overflow-y: auto; scrollbar-width: thin; }
+.prop-voice__line {
+  font-size: 10px; color: var(--text-secondary); padding: 2px 0;
+  border-bottom: 1px solid var(--border); font-family: var(--font-mono);
+}
+.prop-voice__line:last-child { border-bottom: none; }
 .prop-empty { font-size: 11px; color: var(--text-muted); }
 </style>

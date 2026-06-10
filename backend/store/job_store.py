@@ -95,6 +95,27 @@ CREATE INDEX IF NOT EXISTS idx_jobs_heartbeat ON jobs(heartbeat_at);
 #     this threshold is considered stale regardless of status.
 HEARTBEAT_STALE_SEC = 90.0
 
+# ── Data directory: defaults to ~/.transVideo/, overridable via env ──
+
+_DEFAULT_DATA_DIR = os.path.normpath(os.path.expanduser("~/.transVideo"))
+
+
+def get_data_dir() -> str:
+    """Return the application data directory for persistent storage.
+
+    Priority:
+    1. ``TRANVIDEO_DATA_DIR`` environment variable
+    2. ``~/.transVideo/``
+
+    The directory and its ``job_store/`` subdirectory are created on
+    first access.
+    """
+    path = os.environ.get("TRANVIDEO_DATA_DIR", "") or _DEFAULT_DATA_DIR
+    path = os.path.normpath(path)
+    os.makedirs(os.path.join(path, "job_store"), exist_ok=True)
+    return path
+
+
 # ── Old schema (for auto-migration) ──
 
 _OLD_SCHEMA_HINT = "video_path"  # column only in old schema
@@ -134,7 +155,7 @@ class JobStore:
 
     def __init__(self, namespace: str, base_dir: str = "") -> None:
         self._namespace = namespace
-        self._base_dir = base_dir or os.getcwd()
+        self._base_dir = base_dir or get_data_dir()
         self._store_root = os.path.join(self._base_dir, "job_store")
         self._db_path = os.path.join(self._store_root, f"{namespace}.db")
 

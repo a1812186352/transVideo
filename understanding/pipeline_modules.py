@@ -114,6 +114,30 @@ def build_module_tree(
             prev_motion=prev_motion,
         )
 
+        # ── Allocate transcripts and OCR to this module's time window ──
+        contained_transcript: List[str] = []
+        for seg in transcripts:
+            s = seg.get("start", seg.get("start_time", 0))
+            e = seg.get("end", seg.get("end_time", 0))
+            if max(s, start_time) < min(e, end_time):
+                text = seg.get("text", "").strip()
+                if text:
+                    contained_transcript.append(text)
+
+        contained_ocr: List[str] = []
+        for ocr in ocr_data:
+            ts = ocr.get("timestamp", -1)
+            if ts < 0 or ts < start_time or ts > end_time:
+                continue
+            for region in ocr.get("text_regions", []):
+                t = ""
+                if isinstance(region, dict):
+                    t = region.get("text", "")
+                elif isinstance(region, str):
+                    t = region
+                if t and (not watermark_set or t not in watermark_set):
+                    contained_ocr.append(t)
+
         # Save current motion for next iteration
         prev_motion = detail.get("motion_description")
 
@@ -124,6 +148,8 @@ def build_module_tree(
             "label": seg_label,
             "children": [],
             "detail": detail,
+            "contained_transcript": contained_transcript,
+            "contained_ocr": contained_ocr,
         }
 
         # ── Segment type → module type mapping ──

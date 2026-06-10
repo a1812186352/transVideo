@@ -1,0 +1,13 @@
+Crash time   : 20260610_074230
+Exception    : PermissionError
+Value        : [WinError 32] 另一个程序正在使用此文件，进程无法访问。: 'C:\\Users\\18121/.transVideo\\job_store\\analysis.db'
+============================================================
+Traceback (most recent call last):
+  File "<string>", line 20, in <module>
+    os.remove(f)
+    ~~~~~~~~~^^^
+PermissionError: [WinError 32] 另一个程序正在使用此文件，进程无法访问。: 'C:\\Users\\18121/.transVideo\\job_store\\analysis.db'
+
+(objgraph not installed — skip memory snapshot)
+
+GC tracked objects: 60292

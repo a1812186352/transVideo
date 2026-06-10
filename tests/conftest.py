@@ -78,15 +78,11 @@ def client() -> TestClient:
 
 @pytest.fixture(scope="session")
 def e2e_test_video() -> str:
-    """Pick the first available .mov from ``instances/`` for E2E testing.
+    """Use the 10s test MP4 for fast E2E tests.
 
-    Falls back to ``tests/fixtures/test_10s.mp4`` if no .mov is found.
+    The ``instances/`` directory contains long (2 min+) videos that
+    cause analysis pipelines to exceed timeout limits.
     """
-    if INSTANCES_DIR.is_dir():
-        mov_files = sorted(INSTANCES_DIR.glob("*.mov"))
-        if mov_files:
-            return str(mov_files[0])
-    # Fallback
     assert os.path.isfile(TEST_VIDEO), f"Test video not found: {TEST_VIDEO}"
     return TEST_VIDEO
 
@@ -160,6 +156,23 @@ def broken_script(builder: ScriptBuilder) -> Dict[str, Any]:
 def load_json(path: str) -> dict:
     with open(path, "r", encoding="utf-8") as f:
         return json.load(f)
+
+
+# ═══════════════════════════════════════════════════════════════════
+#  Session-wide overrides
+# ═══════════════════════════════════════════════════════════════════
+
+@pytest.fixture(autouse=True, scope="session")
+def _unlimit_analysis_concurrency():
+    """Remove the max-1 concurrency limit on analysis for tests.
+
+    Background analysis threads from one test should not block
+    subsequent tests.  We monkeypatch the semaphore to allow up
+    to 32 concurrent analyzes.
+    """
+    import backend.routers.analysis as analysis_mod
+    import threading
+    analysis_mod._analysis_semaphore = threading.Semaphore(32)
 
 
 # ═══════════════════════════════════════════════════════════════════

@@ -525,6 +525,24 @@ class Pipeline:
             _fail("module_tree", e)
         self._heartbeat()
 
+        # ── Stage 5: Creative deconstruction (post-pipeline analysis) ──
+        creative_pattern: Optional[Dict[str, Any]] = None
+        try:
+            Deconstructor = _lazy_import(
+                "understanding.deconstruction.deconstructor", "Deconstructor",
+            )
+            decon = Deconstructor()
+            creative_pattern = decon.deconstruct(
+                signal_data=signal_data,
+                structure_segments=structure_segments,
+                keyframes=keyframes,
+            )
+            if self.on_progress:
+                dims = [k for k, v in (creative_pattern or {}).items() if v]
+                self.on_progress("创作特征", f"已完成 {len(dims)} 个维度分析")
+        except Exception as exc:
+            _log.debug("Creative deconstruction skipped: %s", exc)
+
         # Mark completed in job store
         if self._job_store and video_id:
             self._job_store.set_status(video_id, "completed")
@@ -534,6 +552,7 @@ class Pipeline:
             keyframes=keyframes,
             structure_segments=structure_segments,
             module_tree=module_tree,
+            creative_pattern=creative_pattern,
         )
 
     # ── Signal Layer ────────────────────────────────────────────────
@@ -1121,78 +1140,30 @@ class Pipeline:
     # ── Job recovery (process restart) ─────────────────────────────
 
     @staticmethod
-    def recover_job(video_id: str, work_dir: str = "", video_type: str = "vlog") -> Dict[str, Any]:
+    def recover_job(*args, **kwargs) -> Dict[str, Any]:
         """Resume a job after process restart.
 
-        Loads the job record from the JobStore, resolves the input
-        video path, and re-runs ``analyze_video`` — the checkpoint
-        system automatically skips already-completed stages.
-
-        Args:
-            video_id: Job identifier.
-            work_dir: Working directory (default: cwd).
-            video_type: Video type preset key.
-
-        Returns:
-            The assembled result dict.
-
-        Raises:
-            ValueError: If the job record or input file is missing.
+        Delegated to :func:`understanding.task_recovery.recover_job`.
         """
-        from backend.store import JobStore
-
-        store = JobStore("analysis", base_dir=work_dir or os.getcwd())
-        job = store.get(video_id)
-        if job is None:
-            raise ValueError(f"Job {video_id} not found in store")
-
-        input_path = job.get("input_path", "")
-        if not input_path or not os.path.exists(input_path):
-            raise ValueError(f"Input file for job {video_id} not found: {input_path}")
-
-        pipeline = Pipeline(work_dir=os.path.dirname(input_path))
-        return pipeline.analyze_video(input_path, video_id=video_id, video_type=video_type)
+        from understanding.task_recovery import recover_job as _rj
+        return _rj(*args, **kwargs)
 
     @staticmethod
-    def recover_stale(work_dir: str = "") -> List[Dict[str, Any]]:
-        """Recover all stale jobs (pending/processing/queued) from the store.
+    def recover_stale(*args, **kwargs) -> List[Dict[str, Any]]:
+        """List stale jobs from the analysis store.
 
-        Returns a list of job dicts that may need attention after a
-        process restart.
+        Delegated to :func:`understanding.task_recovery.recover_stale`.
         """
-        from backend.store import JobStore
-
-        store = JobStore("analysis", base_dir=work_dir or os.getcwd())
-        return store.list_stale()
+        from understanding.task_recovery import recover_stale as _rs
+        return _rs(*args, **kwargs)
 
     # ── ETA estimation ─────────────────────────────────────────────
 
     @staticmethod
-    def estimate_eta(
-        duration_s: float,
-        fps: float = 30.0,
-        has_whisper: bool = True,
-        has_yolo: bool = False,
-        has_api: bool = False,
-        keyframe_count: int = 60,
-    ) -> float:
+    def estimate_eta(*args, **kwargs) -> float:
         """Estimate analysis time in seconds from video parameters.
 
-        Formula (CPU baseline, not GPU):
-          base       = duration * 0.3     (OpenCV frame diff + scene detect)
-          whisper    = duration * 0.8     (Whisper small, single-thread)
-          ocr        = keyframes * 0.15   (Tesseract per frame)
-          yolo       = keyframes * 0.08   (YOLOv8n inference)
-          api        = keyframes * 0.3    (external API network latency)
-          audio      = duration * 0.1     (librosa BPM + energy)
-
-        Returns total estimated seconds.
+        Delegated to :func:`understanding.pipeline_eta.estimate_eta`.
         """
-        base = duration_s * ETA_BASE_PER_SEC
-        whisper = duration_s * ETA_WHISPER_PER_SEC if has_whisper else 0
-        ocr = keyframe_count * ETA_OCR_PER_FRAME
-        yolo = keyframe_count * ETA_YOLO_PER_FRAME if has_yolo else 0
-        api = keyframe_count * ETA_API_PER_FRAME if has_api else 0
-        audio = duration_s * ETA_AUDIO_PER_SEC
-
-        return base + whisper + ocr + yolo + api + audio
+        from understanding.pipeline_eta import estimate_eta as _ee
+        return _ee(*args, **kwargs)

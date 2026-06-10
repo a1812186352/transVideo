@@ -6,6 +6,7 @@ Includes blur pre-filter (skips low-quality frames) and retry on crash.
 
 import logging
 import shutil
+import threading
 from typing import List, Optional
 
 # Lazy imports — pytesseract needs tesseract binary on PATH or configured
@@ -63,6 +64,12 @@ def _frame_is_too_blurry(frame_path: str) -> bool:
     except Exception:
         pass
     return False
+
+
+# ── Global OCR concurrency guard ──
+# Limits the number of simultaneous Tesseract calls across all batches,
+# preventing OOM when multiple batches run concurrently.
+_OCR_SEMAPHORE = threading.Semaphore(2)
 
 
 class OCRExtractor:
@@ -128,7 +135,8 @@ class OCRExtractor:
             regions: List[dict] = []
             for attempt in range(_MAX_RETRIES):
                 try:
-                    regions = self._ocr_frame(frame_path)
+                    with _OCR_SEMAPHORE:
+                        regions = self._ocr_frame(frame_path)
                     break  # success
                 except Exception:
                     if attempt < _MAX_RETRIES - 1:

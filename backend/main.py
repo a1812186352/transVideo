@@ -189,8 +189,24 @@ def _build_metrics_text() -> str:
 
 app = FastAPI(
     title="transVideo API",
-    description="Video structure analysis, migratable script, and generation API",
+    description="""Video structure analysis, migratable script, and generation API.
+
+## 核心工作流
+1. **上传** `POST /upload/` — 上传视频文件（魔数校验 + MIME + 扩展名三级检查）
+2. **分析** `POST /analyze/{video_id}` — 启动分析管线（帧差异 → 场景检测 → ASR → 音频分析 → OCR → 结构推断 → 模块树）
+3. **导出** `POST /export/{video_id}` — 导出为 MP4（CompositeEngine 自动降级 HyperFrames → FFmpeg）
+
+## 可观测性
+- `GET /health` — 健康检查
+- `GET /metrics` — Prometheus 指标（耗时 P50/P95/P99、失败率、队列深度）
+- `GET /recovery/status` — 陈旧任务恢复状态
+
+## 认证
+设置 `TRANVIDEO_API_KEY` 环境变量启用 API Key 鉴权。
+""",
     version="0.1.0",
+    docs_url="/docs",
+    redoc_url="/redoc",
 )
 
 # CORS — allow frontend dev server
@@ -227,18 +243,16 @@ register_error_handlers(app)
 
 @app.on_event("startup")
 async def _recover_stale_tasks() -> None:
-    """Scan job stores for tasks left in a non-terminal state after
-    an ungraceful shutdown.
+    """Ensure data directory exists, then scan for stale tasks."""
+    from backend.store.job_store import get_data_dir, JobStore
 
-    - **Analysis jobs**: kept as-is — they can be resumed via the
-      checkpoint system when the client re-triggers or calls
-      ``GET /recovery/status`` + ``POST /recovery/analyze/{video_id}``.
-    - **Export / render jobs**: marked ``failed`` because the render
-      pipeline has no checkpoint mechanism.
-    """
-    from backend.store import JobStore
+    # ── Ensure data directory ──
+    data_dir = get_data_dir()
+    _log.info("Data directory: %s", data_dir)
+    os.makedirs(os.path.join(data_dir, "job_store"), exist_ok=True)
 
-    base = str(_project_root)
+    # ── Base directory ──
+    base = get_data_dir()
 
     # ── Analysis namespace ──
     analysis_store = JobStore("analysis", base_dir=base)
@@ -290,9 +304,9 @@ async def recovery_status() -> Dict[str, object]:
     Use this to see which analysis jobs are available for checkpoint
     recovery after a restart.
     """
-    from backend.store import JobStore
+    from backend.store.job_store import get_data_dir, JobStore
 
-    base = str(_project_root)
+    base = get_data_dir()
     result: Dict[str, object] = {}
 
     for ns in ("analysis", "export"):
@@ -318,10 +332,10 @@ async def recover_analysis_job(video_id: str) -> Dict[str, object]:
     the remaining work.  If the job is not stale (already completed
     or failed), this is a no-op.
     """
-    from backend.store import JobStore
+    from backend.store.job_store import get_data_dir, JobStore
     from understanding.pipeline_orchestrator import Pipeline
 
-    base = str(_project_root)
+    base = get_data_dir()
     store = JobStore("analysis", base_dir=base)
     job = store.get_job(video_id)
 

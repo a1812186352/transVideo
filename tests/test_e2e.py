@@ -45,7 +45,7 @@ class TestStateTransitions:
     """
 
     @pytest.fixture(autouse=True)
-    def _setup(self, client: TestClient, e2e_test_video: str, isolated_job_stores):
+    def _setup(self, client: TestClient, e2e_test_video: str):
         self.client = client
         data = h.upload_video(client, e2e_test_video)
         self.video_id = data["video_id"]

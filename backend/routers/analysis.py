@@ -9,7 +9,7 @@ import time
 import queue
 from typing import Dict, Optional
 
-from fastapi import APIRouter, BackgroundTasks, Request
+from fastapi import APIRouter, BackgroundTasks, Query, Request
 from fastapi.responses import StreamingResponse
 
 from backend.middleware.error_handler import (
@@ -26,7 +26,9 @@ _log = logging.getLogger(__name__)
 router = APIRouter(prefix="/analyze", tags=["analysis"])
 
 UPLOAD_DIR = os.path.join(os.path.dirname(__file__), "..", "..", "instances")
-BASE_DIR = os.path.join(os.path.dirname(__file__), "..", "..")
+from backend.store.job_store import get_data_dir
+
+BASE_DIR = get_data_dir()
 
 _jobs = JobStore("analysis", base_dir=BASE_DIR)
 
@@ -117,7 +119,8 @@ def _run_analysis_streaming(video_id: str, video_path: str, video_type: str = "v
 
 @router.post("/{video_id}", response_model=AnalysisResponse)
 async def analyze_video(
-    video_id: str, background_tasks: BackgroundTasks, video_type: str = "vlog"
+    video_id: str, background_tasks: BackgroundTasks,
+    video_type: str = Query("vlog", description="Video type preset key. See config/presets.json for available types.")
 ) -> AnalysisResponse:
     existing = _jobs.get_job(video_id)
     if existing and existing.get("status") == "processing":
