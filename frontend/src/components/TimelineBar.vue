@@ -219,7 +219,7 @@ function thumbUrl(mod: any): string | null {
   // Generate from API: fallback
   if (!store.videoId) return null;
   const t = mod.start_time;
-  return `${store.apiBaseUrl.replace(/\/+$/, '')}/video/${store.videoId}/thumbnail?time=${t.toFixed(2)}`;
+  return `${store.apiBaseUrl.replace(/\/+$/, '')}/upload/video/${store.videoId}/thumbnail?time=${t.toFixed(2)}`;
 }
 </script>
 
