@@ -374,7 +374,10 @@ export const useWorkbenchStore = defineStore('workbench', () => {
           onMessage(data: any) {
             if (data.type === 'segment') {
               localModules.push(data.module);
-              timeline.addModule(data.module);
+              // 防止 SSE 重连回放导致重复：检查 id 是否已存在
+              if (!timeline.modules.some(m => m.id === data.module.id)) {
+                timeline.addModule(data.module);
+              }
               pushLog('Segment', `#${data.index} ${data.module.type} @ ${fmtDuration(data.module.start_time)} — ${data.module.label || ''}`, 'data', '📦');
             } else if (data.type === 'done') {
               _sseDone = true;
