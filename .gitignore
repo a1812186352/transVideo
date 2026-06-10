@@ -44,3 +44,9 @@ Desktop.ini
 # Agent config logs
 .reasonix/
 crash_dumps/
+
+# Output
+output/
+
+# Sample videos
+样例视频/
