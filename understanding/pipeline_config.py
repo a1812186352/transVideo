@@ -168,3 +168,11 @@ VIDEO_TYPE_LABELS = {
     "travel": "旅游", "agriculture": "农业", "parenting": "亲子",
     "beauty_fashion": "美妆时尚",
 }
+
+# ── Motion analysis thresholds ──
+ZOOM_IN_SCALE = 1.08            # scale_factor > this → ZOOM_IN
+ZOOM_OUT_SCALE = 0.92           # scale_factor < this → ZOOM_OUT
+PAN_DISPLACEMENT = 0.05         # normalized |dx| or |dy| > this → PAN
+FADE_BRIGHTNESS_DELTA = 0.15    # |brightness_delta| > this → FADE
+ROTATION_DEGREE = 3.0           # |rotation_angle| > this → ROTATE
+MOTION_NOISE_FLOOR = 0.005      # max(|dx|,|dy|,|scale-1|) < this → STATIC

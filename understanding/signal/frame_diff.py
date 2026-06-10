@@ -5,7 +5,7 @@ Produces a frame-difference curve for downstream adaptive sampling.
 
 import cv2
 import numpy as np
-from typing import List, Tuple
+from typing import Any, Dict, List, Tuple
 
 
 class FrameDiffAnalyzer:
@@ -127,3 +127,38 @@ class FrameDiffAnalyzer:
         )
         cv2.normalize(hist, hist, 0, 1, cv2.NORM_MINMAX)
         return hist.flatten()
+
+
+# ── Motion-analysis bridge ────────────────────────────────────────────
+
+def analyze_frame_pair_motion(
+    prev_frame: np.ndarray,
+    curr_frame: np.ndarray,
+) -> Dict[str, Any]:
+    """Wrap MotionAnalyzer.analyze_keyframe_pair for pipeline integration.
+
+    Returns a dict compatible with ``visual_features`` extension, suitable
+    for merging into per-frame feature records.
+
+    Args:
+        prev_frame: Previous frame (BGR numpy array).
+        curr_frame: Current frame (BGR numpy array).
+
+    Returns:
+        Dict with keys: motion_label, displacement, scale_factor,
+        rotation_angle, brightness_delta, confidence.
+    """
+    from understanding.signal.motion_analysis import MotionAnalyzer
+
+    analyzer = MotionAnalyzer()
+    result = analyzer.analyze_keyframe_pair(prev_frame, curr_frame)
+    analyzer.classify_motion(result)
+
+    return {
+        "motion_label": result.label,
+        "displacement": result.displacement,
+        "scale_factor": result.scale_factor,
+        "rotation_angle": result.rotation_angle,
+        "brightness_delta": result.brightness_delta,
+        "confidence": result.confidence,
+    }

@@ -289,6 +289,41 @@ def build_detail(
         mood_confidence = audio_data.get("mood_confidence", 0.0)
         mood_secondary = audio_data.get("mood_secondary", "")
 
+    # VAD-aware: non-speech BGM narrative (replaces transcript-driven text)
+    has_speech = audio_data.get("has_speech", True) if audio_data else True
+    bgm_narrative = ""
+    if not has_speech and audio_data:
+        bgm_val = audio_data.get("bgm_type", "")
+        bpm_val = audio_data.get("bpm", 0)
+        energy_curve_local = audio_data.get("energy_curve", [])
+        beat_times_local = audio_data.get("beat_times", [])
+        dur = audio_data.get("duration", 0)
+
+        # Energy peaks: count frames above 90th percentile
+        peak_count = 0
+        if energy_curve_local:
+            threshold = sorted(energy_curve_local)[int(len(energy_curve_local) * 0.9)]
+            peak_count = sum(1 for v in energy_curve_local if v >= threshold)
+
+        # Beat density
+        beat_dens = "稀疏"
+        if dur > 0:
+            bd = len(beat_times_local) / dur
+            if bd > 2.0:
+                beat_dens = "密集"
+            elif bd >= 1.0:
+                beat_dens = "适中"
+
+        parts = []
+        if bgm_val and bgm_val != "无":
+            parts.append(f"BGM: {bgm_val}")
+        if bpm_val > 0:
+            parts.append(f"BPM {bpm_val:.0f}")
+        if peak_count > 0:
+            parts.append(f"能量峰 {peak_count}处")
+        parts.append(f"节拍{beat_dens}")
+        bgm_narrative = " · ".join(parts)
+
     # ── Inter-module motion trend ──
 
     bc = vf_structured.get("brightness_curve", [])
@@ -394,6 +429,8 @@ def build_detail(
         "mood": mood,
         "mood_confidence": mood_confidence,
         "mood_secondary": mood_secondary,
+        "has_speech": has_speech,
+        "bgm_narrative": bgm_narrative,
         "brightness_curve": bc,
         "composition_changes": vf_structured.get("composition_changes", 0.0),
         "motion_description": vf_structured.get("motion_description", {}),
@@ -631,25 +668,131 @@ def derive_visual_from_features(
         result.append("物体: 无显著物体")
 
     # ═══════════════ 动效层 ═══════════════
+    # ── Compute enriched motion signals from frame data ──
+    bbox_area_trend: float = 0.0  # + = expanding, - = contracting
+    brightness_trend: float = 0.0
+    bbox_x_drift: float = 0.0      # + = rightward, - = leftward
 
-    if fl < FL_STILL and hd < HD_STILL:
+    bbox_centers_x: List[float] = []
+    if frames:
+        bright_vals = [f.get("brightness_mean", 0.0) for f in frames]
+        if len(bright_vals) >= 3:
+            half = len(bright_vals) // 2
+            b_first = sum(bright_vals[:half]) / max(half, 1)
+            b_last = sum(bright_vals[-half:]) / max(half, 1)
+            brightness_trend = (b_last - b_first) / max(max(b_last, b_first), 0.001)
+
+    bbox_areas = []
+    for f in frames:
+        centers: List[float] = []
+        areas: List[float] = []
+        for o in (f.get("yolo_objects", []) or []):
+            b = o.get("bbox", [])
+            if len(b) >= 4:
+                cx = (b[0] + b[2]) / 2.0
+                centers.append(cx)
+                areas.append((b[2] - b[0]) * (b[3] - b[1]))
+        bbox_centers_x.append(sum(centers) / max(len(centers), 1) if centers else 0.0)
+        top3 = sorted(areas, reverse=True)[:3]
+        bbox_areas.append(sum(top3) / max(len(top3), 1) if top3 else 0.0)
+
+    if len(bbox_areas) >= 2:
+        half = max(len(bbox_areas) // 2, 1)
+        left_mean = sum(bbox_areas[:half]) / max(half, 1)
+        right_mean = sum(bbox_areas[half:]) / max(len(bbox_areas) - half, 1)
+        if left_mean > 0 and right_mean > 0:
+            bbox_area_trend = right_mean / left_mean  # >1 = zoom in, <1 = zoom out
+
+    if len(bbox_centers_x) >= 2:
+        half = max(len(bbox_centers_x) // 2, 1)
+        left_cx = sum(bbox_centers_x[:half]) / max(half, 1)
+        right_cx = sum(bbox_centers_x[half:]) / max(len(bbox_centers_x) - half, 1)
+        bbox_x_drift = right_cx - left_cx
+
+    # ── Enhanced motion classification ──
+    motion_label_code = ""  # machine-readable code (ZOOM_IN, PAN, etc.)
+    scale_factor = round(bbox_area_trend, 3) if bbox_area_trend != 0 else None
+    rotation_angle = None
+    displacement = round(bbox_x_drift, 1) if abs(bbox_x_drift) > 2 else None
+
+    # Fade detection: brightness trend (requires near-zero flow + strong brightness shift)
+    if abs(brightness_trend) > 0.25 and fl < FL_STILL:
+        if brightness_trend > 0:
+            motion = "淡入过渡"
+            motion_label_code = "FADE_IN"
+        else:
+            motion = "淡出过渡"
+            motion_label_code = "FADE_OUT"
+
+    # Zoom detection: bbox area consistently expanding/contracting
+    elif bbox_area_trend > 1.25 and fl < FL_FAST:
+        motion = f"镜头推近（放大 ×{bbox_area_trend:.2f}）"
+        motion_label_code = "ZOOM_IN"
+    elif 0.001 < bbox_area_trend < 0.75 and fl < FL_FAST:
+        zoom_ratio = max(1.0 / bbox_area_trend, 1.0)
+        motion = f"镜头拉远（缩小 ×{zoom_ratio:.2f}）"
+        motion_label_code = "ZOOM_OUT"
+
+    # Pan detection: consistent x-drift of tracked objects
+    elif abs(bbox_x_drift) > 20 and fl < FL_FAST:
+        direction = "右移" if bbox_x_drift > 0 else "左移"
+        motion = f"画面{direction}"
+        motion_label_code = "PAN"
+        displacement = round(bbox_x_drift, 1)
+
+    # Slide detection: moderate flow + weak bbox change
+    elif FL_STILL < fl <= FL_SLIGHT and abs(bbox_area_trend - 1) < 0.15:
+        motion = "滑动平移"
+        motion_label_code = "SLIDE"
+
+    # Rotate heuristic: moderate flow + high std in center dispersion
+    elif FL_SLIGHT < fl <= FL_PUSH:
+        # Estimate rotation from center variance (crude proxy)
+        if len(bbox_centers_x) >= 2:
+            spreads = [max(cs) - min(cs) for cs in bbox_centers_x if len(cs) > 1]
+            if spreads and max(spreads) - min(spreads) > 50:
+                motion = "镜头旋转"
+                motion_label_code = "ROTATE"
+                rotation_angle = round(max(spreads) - min(spreads), 1)
+            else:
+                motion = "缓推镜头 / 平移跟随"
+                motion_label_code = "PUSH"
+        else:
+            motion = "缓推镜头 / 平移跟随"
+            motion_label_code = "PUSH"
+
+    # Fallback to existing 5-level system
+    elif fl < FL_STILL and hd < HD_STILL:
         motion = "静止定镜"
+        motion_label_code = "STILL"
     elif FL_STILL <= fl <= FL_SLIGHT:
         motion = "轻微晃动"
-    elif FL_SLIGHT < fl <= FL_PUSH:
-        motion = "缓推镜头 / 平移跟随"
+        motion_label_code = "SHAKE"
     elif FL_PUSH < fl <= FL_FAST and hd < HD_FAST:
         motion = "快速摇镜"
+        motion_label_code = "PAN"
     elif fl > FL_FAST and hd > HD_VIOLENT:
         motion = "剧烈切换"
+        motion_label_code = "CUT"
     elif fl >= FL_PUSH:
         motion = "画面运动"
-    elif fl < FL_STILL:
-        motion = "静止定镜"
+        motion_label_code = "MOVE"
     else:
-        motion = "画面运动"
+        motion = "静止定镜"
+        motion_label_code = "STILL"
 
-    result.append(f"动效: {motion}（光流均值 {fl:.1f}）")
+    # ── Build enriched text description ──
+    motion_parts = [motion]
+    if fl >= FL_STILL:
+        motion_parts.append(f"光流 {fl:.1f}")
+    if scale_factor:
+        motion_parts.append(f"缩放 ×{scale_factor}")
+    if rotation_angle:
+        motion_parts.append(f"旋转 {rotation_angle}°")
+    if displacement:
+        motion_parts.append(f"位移 {displacement}px")
+
+    result.append(f"动效: {'｜'.join(motion_parts)}")
 
     # ── Structured data ──
 
@@ -688,6 +831,10 @@ def derive_visual_from_features(
             "std": round(flow_std, 2),
             "max": round(flow_max, 2),
             "label": motion,
+            "label_code": motion_label_code,
+            "scale_factor": scale_factor,
+            "rotation_angle": rotation_angle,
+            "displacement": displacement,
         }
 
     # object_transitions — YOLO bbox disappear/appear per frame pair

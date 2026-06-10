@@ -13,15 +13,20 @@ import { ref, computed, watch, onMounted, onUnmounted } from 'vue';
 
 const props = defineProps<{
   energyCurve: number[];
-  duration: number;       // total video duration in seconds
-  currentTime: number;    // playhead position in seconds
-  bpm?: number;           // optional BPM for beat markers
+  duration: number;       // module duration in seconds (NOT total video duration)
+  startTime?: number;     // module start offset in video (default 0)
+  currentTime: number;    // global playhead position in seconds
+  bpm?: number;
   moodLabels?: Array<{ at: number; label: string; color: string }>;
 }>();
 
 const emit = defineEmits<{
   seek: [time: number];
 }>();
+
+// Effective time range for this waveform
+const rangeStart = computed(() => props.startTime ?? 0);
+const rangeEnd = computed(() => rangeStart.value + (props.duration || 0));
 
 const canvasRef = ref<HTMLCanvasElement | null>(null);
 const containerRef = ref<HTMLDivElement | null>(null);
@@ -81,38 +86,44 @@ function draw() {
     ctx.fillRect(x, y, barW, hVal);
   }
 
-  // — Mood label zones (colored background strips) —
-  if (props.moodLabels?.length) {
+  // — Mood label zones (offset by module start_time) —
+  if (props.moodLabels?.length && props.duration > 0) {
     for (const mood of props.moodLabels) {
-      const x = (mood.at / props.duration) * WIDTH;
+      const localAt = mood.at - rangeStart.value;
+      if (localAt < 0 || localAt > props.duration) continue;
+      const x = (localAt / props.duration) * WIDTH;
       ctx.fillStyle = mood.color + '22'; // very transparent
       ctx.fillRect(x - 1, 0, 4, HEIGHT);
     }
   }
 
-  // — Playhead —
+  // — Playhead (offset by module start_time) —
   if (props.duration > 0 && props.currentTime >= 0) {
-    const px = (props.currentTime / props.duration) * WIDTH;
-    ctx.strokeStyle = '#fff';
-    ctx.lineWidth = 1.5;
-    ctx.beginPath();
-    ctx.moveTo(px, 0);
-    ctx.lineTo(px, HEIGHT);
-    ctx.stroke();
+    const localTime = props.currentTime - rangeStart.value;
+    const inRange = localTime >= -0.05 && localTime <= props.duration + 0.05;
+    if (inRange) {
+      const px = (Math.max(0, Math.min(localTime, props.duration)) / props.duration) * WIDTH;
+      ctx.strokeStyle = '#fff';
+      ctx.lineWidth = 1.5;
+      ctx.beginPath();
+      ctx.moveTo(px, 0);
+      ctx.lineTo(px, HEIGHT);
+      ctx.stroke();
 
-    // Playhead triangle
-    ctx.fillStyle = '#fff';
-    ctx.beginPath();
-    ctx.moveTo(px - 4, 0);
-    ctx.lineTo(px + 4, 0);
-    ctx.lineTo(px, 5);
-    ctx.closePath();
-    ctx.fill();
+      // Playhead triangle
+      ctx.fillStyle = '#fff';
+      ctx.beginPath();
+      ctx.moveTo(px - 4, 0);
+      ctx.lineTo(px + 4, 0);
+      ctx.lineTo(px, 5);
+      ctx.closePath();
+      ctx.fill();
+    }
   }
 }
 
 // Redraw on data changes
-watch([() => props.energyCurve, () => props.currentTime, () => props.duration], draw, { deep: true });
+watch([() => props.energyCurve, () => props.currentTime, () => props.duration, () => props.startTime], draw, { deep: true });
 
 let rafId = 0;
 function loop() {
@@ -128,13 +139,13 @@ onUnmounted(() => {
   cancelAnimationFrame(rafId);
 });
 
-// — Click to seek —
+// — Click to seek (maps canvas position → module-local time → global time) —
 function onCanvasClick(e: MouseEvent) {
   if (!props.duration) return;
   const rect = (e.target as HTMLCanvasElement).getBoundingClientRect();
   const x = e.clientX - rect.left;
-  const t = (x / WIDTH) * props.duration;
-  emit('seek', t);
+  const localT = (x / WIDTH) * props.duration;
+  emit('seek', rangeStart.value + localT);
 }
 </script>
 

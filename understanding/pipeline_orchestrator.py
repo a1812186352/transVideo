@@ -88,6 +88,7 @@ class Pipeline:
         self._frame_extractor: Optional[Any] = None
         self._sampler: Optional[AdaptiveSampler] = None
         self._structure: Optional[StructureInferrer] = None
+        self._vad_detector: Optional[Any] = None
 
         # Checkpoint / resume state (lazy-initialised when video_id is set)
         self._job_store: Any = None
@@ -327,6 +328,7 @@ class Pipeline:
         need_scene = not self._is_stage_done("scene_detect")
         need_transcribe = not self._is_stage_done("audio_transcribe")
         need_audio = not self._is_stage_done("audio_analysis")
+        need_vad = not self._is_stage_done("vad_detect")
 
         # ── Bootstrap results from checkpointed data ──
         results: Dict[str, Any] = {
@@ -355,6 +357,13 @@ class Pipeline:
             audio_art = job_store.load_artifact(video_id, "audio_analysis")
             if audio_art:
                 results["audio_data"] = audio_art
+
+            vad_art = job_store.load_artifact(video_id, "vad_detect")
+            if vad_art:
+                if "audio_data" not in results:
+                    results["audio_data"] = {}
+                results["audio_data"]["vad"] = vad_art
+                results["audio_data"]["has_speech"] = vad_art.get("has_speech", True)
 
         # ── Task wrappers ──
 
@@ -409,20 +418,32 @@ class Pipeline:
                 _log.warning("Audio analysis failed: %s", e)
                 return None
 
-        # ── Build task list (only incomplete sub-tasks) ──
-        tasks = []
-        if need_diff:
-            tasks.append(("diff", _frame_diff))
-        if need_scene:
-            tasks.append(("scene", _scene_detect))
-        if need_transcribe:
-            tasks.append(("transcript", _transcribe))
-        if need_audio:
-            tasks.append(("audio", _audio_analysis))
+        def _vad_detect():
+            try:
+                if self._vad_detector is None:
+                    VADDetector = _lazy_import(
+                        "understanding.signal.vad_detect", "VADDetector"
+                    )
+                    self._vad_detector = VADDetector()
+                return ("vad", self._vad_detector.detect(video_path))
+            except Exception as e:
+                _log.warning("VAD detection failed: %s", e)
+                return ("vad", {"has_speech": True})
 
-        if tasks:
+        # ── Stage 1: diff + scene + audio + vad (parallel) ──
+        stage1 = []
+        if need_diff:
+            stage1.append(("diff", _frame_diff))
+        if need_scene:
+            stage1.append(("scene", _scene_detect))
+        if need_audio:
+            stage1.append(("audio", _audio_analysis))
+        if need_vad:
+            stage1.append(("vad", _vad_detect))
+
+        if stage1:
             with concurrent.futures.ThreadPoolExecutor(max_workers=4) as pool:
-                future_map = {pool.submit(fn): kind for kind, fn in tasks}
+                future_map = {pool.submit(fn): kind for kind, fn in stage1}
                 for f in concurrent.futures.as_completed(future_map):
                     kind = future_map[f]
                     r = f.result()
@@ -430,9 +451,9 @@ class Pipeline:
                         continue
                     self._merge_signal_result(results, kind, r[1] if len(r) > 1 else None, r)
 
-            # ── Persist artifacts for newly-completed sub-tasks ──
+            # Persist stage-1 artifacts
             if job_store:
-                for kind, _ in tasks:
+                for kind, _ in stage1:
                     if kind == "diff" and results.get("diff_curve"):
                         job_store.save_artifact(video_id, "frame_diff", {
                             "diff_curve": results["diff_curve"],
@@ -446,17 +467,36 @@ class Pipeline:
                             "scene_boundaries": results["scene_boundaries"],
                         })
                         job_store.update_checkpoint(video_id, "scene_detect")
-                    elif kind == "transcript" and results.get("transcript_segments"):
-                        job_store.save_artifact(video_id, "audio_transcribe", {
-                            "transcript_segments": results["transcript_segments"],
-                        })
-                        job_store.update_checkpoint(video_id, "audio_transcribe")
                     elif kind == "audio" and results.get("audio_data"):
                         job_store.save_artifact(video_id, "audio_analysis",
                                                 results["audio_data"])
                         job_store.update_checkpoint(video_id, "audio_analysis")
-        else:
-            _log.info("Signal layer: all 4 sub-tasks loaded from checkpoint")
+                    elif kind == "vad" and results.get("audio_data", {}).get("vad"):
+                        job_store.save_artifact(video_id, "vad_detect",
+                                                results["audio_data"]["vad"])
+                        job_store.update_checkpoint(video_id, "vad_detect")
+
+        # ── Stage 2: transcription (gated by VAD) ──
+        vad_has_speech = results.get("audio_data", {}).get("has_speech", True)
+        if need_transcribe and vad_has_speech:
+            with concurrent.futures.ThreadPoolExecutor(max_workers=1) as pool:
+                f = pool.submit(_transcribe)
+                r = f.result()
+                if r is not None:
+                    self._merge_signal_result(results, "transcript", r[1] if len(r) > 1 else None, r)
+                # Persist transcription
+                if job_store and results.get("transcript_segments"):
+                    job_store.save_artifact(video_id, "audio_transcribe", {
+                        "transcript_segments": results["transcript_segments"],
+                    })
+                    job_store.update_checkpoint(video_id, "audio_transcribe")
+        elif need_transcribe and not vad_has_speech:
+            _log.info("VAD: no speech detected — skipping Whisper transcription")
+        elif not need_transcribe:
+            pass  # already checkpointed
+
+        if not stage1 and not (need_transcribe and vad_has_speech):
+            _log.info("Signal layer: all sub-tasks loaded from checkpoint")
 
         return results
 
@@ -479,6 +519,13 @@ class Pipeline:
             results["transcript_segments"] = payload
         elif kind == "audio":
             results["audio_data"] = payload
+        elif kind == "vad":
+            vad_result = raw[1]
+            if isinstance(vad_result, dict):
+                if "audio_data" not in results:
+                    results["audio_data"] = {}
+                results["audio_data"]["vad"] = vad_result
+                results["audio_data"]["has_speech"] = vad_result.get("has_speech", True)
 
     # ── Filter Layer ────────────────────────────────────────────────
 
