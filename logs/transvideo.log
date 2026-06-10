@@ -142,3 +142,35 @@
 {"timestamp": "2026-06-10T14:53:54.933383", "level": "INFO", "logger": "test", "module": "", "line": 0, "message": "Structured logger works", "video_id": "abc", "elapsed_ms": 42}
 {"timestamp": "2026-06-10T14:54:43.705860", "level": "INFO", "logger": "root", "module": "log_config", "line": 75, "message": "Logging initialized — file=D:\\xiangmuji\\transVideo\\logs\\transvideo.log level=INFO console=True"}
 {"timestamp": "2026-06-10T14:55:36.611219", "level": "INFO", "logger": "root", "module": "log_config", "line": 75, "message": "Logging initialized — file=D:\\xiangmuji\\transVideo\\logs\\transvideo.log level=INFO console=True"}
+2026-06-10 15:00:51 | INFO     | backend.routers.analysis | analysis.py:55 | Analysis thread started for aec87102d36e4d21 (type=commercial)
+2026-06-10 15:00:52 | INFO     | pyscenedetect | scene_manager.py:547 | Detecting scenes...
+2026-06-10 15:00:52 | WARNING  | understanding.pipeline_orchestrator | pipeline_orchestrator.py:445 | Audio analysis failed: Cannot extract audio from D:\xiangmuji\transVideo\backend\routers\..\..\instances\aec87102d36e4d21.mp4
+2026-06-10 15:00:52 | WARNING  | understanding.signal.vad_detect | vad_detect.py:58 | silero-vad load failed (EOF when reading a line) — gate disabled
+2026-06-10 15:01:00 | WARNING  | understanding.pipeline_orchestrator | pipeline_orchestrator.py:433 | Audio transcription failed: tuple index out of range
+2026-06-10 15:01:08 | WARNING  | understanding.signal.ocr_extract | ocr_extract.py:69 | OCR: 0/7 frames have text — may indicate OCR engine issue or text-free frames
+2026-06-10 15:01:08 | WARNING  | understanding.signal.ocr_extract | ocr_extract.py:69 | OCR: 0/8 frames have text — may indicate OCR engine issue or text-free frames
+2026-06-10 15:01:12 | INFO     | understanding.signal.visual_features | visual_features.py:426 | Loading YOLOv8n on cpu ...
+2026-06-10 15:01:12 | INFO     | understanding.signal.visual_features | visual_features.py:428 | YOLOv8n loaded on cpu
+2026-06-10 15:01:33 | INFO     | understanding.pipeline_orchestrator | pipeline_orchestrator.py:775 | Visual features from opencv: 15 frames, 0 descriptions (api_time=0.00s)
+2026-06-10 15:01:33 | INFO     | understanding.pipeline_orchestrator | pipeline_orchestrator.py:833 | audio_data missing energy_curve, falling back to diff_curve
+2026-06-10 15:01:33 | ERROR    | understanding.pipeline_orchestrator | pipeline_orchestrator.py:156 | Pipeline stage 'module_tree' failed: object of type 'float' has no len()
+Traceback (most recent call last):
+  File "D:\xiangmuji\transVideo\understanding\pipeline_orchestrator.py", line 307, in analyze_video
+        _future.result(timeout=ANALYZE_VIDEO_GLOBAL_TIMEOUT)
+                      ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+    ...<9 lines>...
+        from backend.middleware.error_handler import AnalysisError
+        ^
+  File "D:\xiangmuji\transVideo\understanding\pipeline_modules.py", line 98, in build_module_tree
+    detail = build_detail(
+        seg_type=seg_type,
+    ...<14 lines>...
+        prev_motion=prev_motion,
+    )
+  File "D:\xiangmuji\transVideo\understanding\pipeline_detail.py", line 80, in build_detail
+    vf_desc, vf_structured = derive_visual_from_features(visual_features, start, end, total_dur, video_type=video_type)
+                             ~~~~~~~~~~~~~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "D:\xiangmuji\transVideo\understanding\pipeline_detail.py", line 848, in derive_visual_from_features
+    spreads = [max(cs) - min(cs) for cs in bbox_centers_x if len(cs) > 1]
+                                                             ~~~^^^^
+TypeError: object of type 'float' has no len()
