@@ -21,6 +21,8 @@
 
     <!-- Right: Actions -->
     <div class="topbar__actions">
+      <button class="topbar__btn" @click="saveProject" title="保存项目 Ctrl+S">💾</button>
+      <button class="topbar__btn" @click="loadProject" title="加载项目">📂</button>
       <div class="topbar__theme">
         <button class="topbar__theme-btn" :class="{ active: !isDark }" @click="setTheme('light')">浅色</button>
         <button class="topbar__theme-btn" :class="{ active: isDark }" @click="setTheme('dark')">深色</button>
@@ -65,8 +67,49 @@ function setTheme(theme: string) {
   isDark.value = theme === 'dark';
 }
 
-function openSettings() {
-  emit('settings');
+function openSettings() { emit('settings'); }
+
+import { useProjectStore } from '../stores/project';
+import { useTimelineStore } from '../stores/timelineStore';
+
+function saveProject() {
+  const store = useProjectStore();
+  const timeline = useTimelineStore();
+  const data = {
+    version: '1.0.0',
+    savedAt: new Date().toISOString(),
+    metadata: store.metadata,
+    modules: JSON.parse(JSON.stringify(timeline.modules)),
+    tracks: JSON.parse(JSON.stringify(timeline.tracks)),
+  };
+  const blob = new Blob([JSON.stringify(data, null, 2)], { type: 'application/json' });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = url; a.download = `transvideo-${Date.now()}.tvideo.json`; a.click();
+  URL.revokeObjectURL(url);
+}
+
+function loadProject() {
+  const input = document.createElement('input');
+  input.type = 'file'; input.accept = '.json,.tvideo.json';
+  input.onchange = (e: any) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    const reader = new FileReader();
+    reader.onload = (ev) => {
+      try {
+        const data = JSON.parse(ev.target?.result as string);
+        if (!data.modules) return;
+        const store = useProjectStore();
+        const timeline = useTimelineStore();
+        if (data.metadata) store.setMetadata(data.metadata);
+        if (data.modules) timeline.setModules(data.modules);
+        if (data.tracks) timeline.setTracks(data.tracks);
+      } catch { alert('项目文件格式错误'); }
+    };
+    reader.readAsText(file);
+  };
+  input.click();
 }
 </script>
 
