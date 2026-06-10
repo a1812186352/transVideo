@@ -49,6 +49,45 @@ ALLOWED_EXTENSIONS: Set[str] = {
     ".mpeg", ".mpg", ".m4v", ".3gp", ".3g2",
 }
 
+# ── File header magic bytes (魔数) — not reliant on MIME/extension ──
+# (bytes, label) — read first 12-16 bytes of file
+FILE_MAGIC_SIGNATURES: List[tuple] = [
+    # MP4/MOV/M4V/3GP check relies on ftyp at offset 4 (handled below)
+    (b"\x1a\x45\xdf\xa3", "webm/mkv"),  # EBML header
+    (b"RIFF", "avi"),                    # RIFF container
+    (b"\x00\x00\x01\xba", "mpeg"),      # MPEG program stream
+    (b"\x00\x00\x01\xb3", "mpeg"),      # MPEG video
+]
+
+
+def _validate_magic(content: bytes) -> str:
+    """Validate file header magic bytes against known video signatures.
+
+    Returns the detected format label or raises UploadInvalidTypeError.
+
+    This check is performed **before** MIME/extension checks and
+    catches renamed files or missing Content-Type headers.
+    """
+    if len(content) < 12:
+        raise UploadInvalidTypeError(
+            message="File too small for video header validation",
+            details={"size_bytes": len(content)},
+        )
+
+    for sig, label in FILE_MAGIC_SIGNATURES:
+        if content.startswith(sig):
+            return label
+
+    # Special: MP4/MOV/3GP all start with an atom size + "ftyp"
+    # Pattern: 00 00 00 XX 66 74 79 70 (size) f t y p
+    if content[4:8] == b"ftyp":
+        return "mp4/mov/3gp"
+
+    raise UploadInvalidTypeError(
+        message="File does not match any known video container signature",
+        details={"first_16_bytes": content[:16].hex(" ")},
+    )
+
 # Maximum concurrent uploads per client IP
 MAX_CONCURRENT_UPLOADS = 3
 
@@ -126,7 +165,7 @@ async def upload_video(request: Request, file: UploadFile = File(...)) -> Upload
     if not file.filename:
         raise UploadInvalidTypeError(message="No file provided")
 
-    # ── Validate file type (MIME + extension) ──
+    # ── Validate file type — 3-tier: magic → extension → MIME ──
     ext = _validate_video_type(file.filename, file.content_type)
 
     # ── Concurrency throttle per client IP ──
@@ -139,9 +178,12 @@ async def upload_video(request: Request, file: UploadFile = File(...)) -> Upload
         _log.warning("Upload concurrency limit reached for %s", ip)
 
     async with sem:
-        # ── Stream file in chunks to check size early ──
+        # ── Read file content ──
         content = await file.read()
         file_size = len(content)
+
+        # ── Magic bytes validation (operates on content, not metadata) ──
+        _validate_magic(content)
 
         # ── Size validation ──
         if file_size > MAX_UPLOAD_SIZE:

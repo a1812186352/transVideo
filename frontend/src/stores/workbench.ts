@@ -360,46 +360,54 @@ export const useWorkbenchStore = defineStore('workbench', () => {
       if (!res.ok) throw new Error(`Analyze request failed: HTTP ${res.status}`);
       pushLog('Pipeline', '分析任务已提交，建立实时推送连接…');
 
-      // 2) 通过 SSE 实时接收 segment 事件
+      // 2) 通过 SSE 实时接收 segment 事件（带自动重连）
       const sseUrl = `${base}/analyze/${project.videoId}/stream`;
-      const es = new EventSource(sseUrl);
-
-      // ── 局部累积 SSE 流式到达的模块 ──
+      const { SseClient } = await import('../utils/sseConnection');
       const localModules: any[] = [];
+      let _sseDone = false;
 
       const completed = await new Promise<{ moduleCount: number }>((resolve, reject) => {
-        const timeout = setTimeout(() => {
-          es.close();
-          reject(new Error('分析超时（20 分钟）'));
-        }, 20 * 60 * 1000);
+        const timeout = setTimeout(() => reject(new Error('分析超时（20 分钟）')), 20 * 60 * 1000);
 
-        es.onmessage = (event) => {
-          try {
-            const data = JSON.parse(event.data);
+        const sse = new SseClient({
+          url: sseUrl,
+          onMessage(data: any) {
             if (data.type === 'segment') {
-              const mod = data.module;
-              // 本地累积 + 实时写入 timelineStore（卡片逐步出现）
-              localModules.push(mod);
-              timeline.addModule(mod);
-              // 确保 addModule 不会触发 SSE 段内重复渲染；pushLog 仅作监控日志
-              pushLog('Segment', `#${data.index} ${mod.type} @ ${fmtDuration(mod.start_time)} — ${mod.label || ''}`, 'data', '📦');
+              localModules.push(data.module);
+              timeline.addModule(data.module);
+              pushLog('Segment', `#${data.index} ${data.module.type} @ ${fmtDuration(data.module.start_time)} — ${data.module.label || ''}`, 'data', '📦');
             } else if (data.type === 'done') {
+              _sseDone = true;
               clearTimeout(timeout);
+              sse.destroy();
               resolve({ moduleCount: data.total });
             } else if (data.type === 'error') {
               clearTimeout(timeout);
+              sse.destroy();
               reject(new Error(data.message || '分析异常'));
             }
-          } catch { /* ignore parse errors */ }
-        };
-
-        es.onerror = () => {
-          clearTimeout(timeout);
-          reject(new Error('SSE 连接中断'));
-        };
+          },
+          onStateChange(state) {
+            if (state === 'fallback') {
+              pushLog('Pipeline', 'SSE 连接断开，切换为轮询模式…', 'warn', '⚠');
+            }
+          },
+          maxRetries: 3,
+          pollInterval: 2000,
+          pollFn: async () => {
+            if (_sseDone) return;
+            const pollRes = await fetch(`${base}/analyze/${project.videoId}`);
+            if (!pollRes.ok) return;
+            const result = await pollRes.json();
+            if (result.status === 'completed') {
+              _sseDone = true;
+              clearTimeout(timeout);
+              resolve({ moduleCount: result.script?.modules?.length || 0 });
+            }
+          },
+        });
       });
 
-      es.close();
       pushLog('Pipeline', `实时推送完成，共接收 <b>${completed.moduleCount}</b> 个模块，获取完整脚本…`, 'ok', '✅');
 
       // 3) 拉取完整结果（含 metadata / tracks）
@@ -588,15 +596,13 @@ export const useWorkbenchStore = defineStore('workbench', () => {
      ═══════════════════════════════════ */
   const fmtEta = (durSec: number): string => {
     const fps = project.metadata.fps || 30;
-    const isApi = project.visionProvider === 'api' && !!project.visionApiUrl;
     const kf = Math.max(1, Math.ceil((durSec * fps) / (fps / 5) / Math.max(1, Math.ceil(durSec / 10))));
     const base = durSec * 0.25;
     const whisper = durSec * 0.6;
     const audio = durSec * 0.08;
     const ocr = kf * 0.12;
     const yolo = kf * 0.06;
-    const api = isApi ? kf * 0.4 : 0;
-    const total = Math.ceil((base + whisper + audio + ocr + yolo + api) * 1.15);
+    const total = Math.ceil((base + whisper + audio + ocr + yolo) * 1.15);
     if (total < 60) return `约 ${total} 秒`;
     const min = Math.floor(total / 60);
     const sec = total % 60;

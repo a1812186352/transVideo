@@ -23,6 +23,7 @@ instances/.mp4/
 # Downloaded ML models
 yolov8n.pt
 *.pt
+understanding/models/
 
 # IDE / Editor
 .vscode/

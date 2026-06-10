@@ -56,6 +56,7 @@ def build_module_tree(
     video_path: str = "",
     visual_features: Optional[List[dict]] = None,
     audio_data: Optional[Dict[str, Any]] = None,
+    video_type: str = "vlog",
 ) -> List[Dict[str, Any]]:
     """Convert structure segments into a 5-type module tree with detail.
 
@@ -109,6 +110,7 @@ def build_module_tree(
             visual_features=visual_features,
             audio_data=audio_data,
             watermark_set=watermark_set,
+            video_type=video_type,
             prev_motion=prev_motion,
         )
 

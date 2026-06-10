@@ -4,6 +4,7 @@ import asyncio
 import json
 import logging
 import os
+import threading
 import time
 import queue
 from typing import Dict, Optional
@@ -28,6 +29,11 @@ UPLOAD_DIR = os.path.join(os.path.dirname(__file__), "..", "..", "instances")
 BASE_DIR = os.path.join(os.path.dirname(__file__), "..", "..")
 
 _jobs = JobStore("analysis", base_dir=BASE_DIR)
+
+# ── Global concurrency guard — max 1 concurrent analysis at a time ──
+# Multiple analysis jobs simultaneously load multiple Whisper (~1 GB) and
+# OpenCV models into memory, risking OOM.  The semaphore serializes them.
+_analysis_semaphore = threading.Semaphore(1)
 
 # Per-video_id SSE queues — keyed by video_id, removed after analysis completes
 _streams: Dict[str, queue.Queue] = {}
@@ -99,6 +105,12 @@ def _run_analysis_streaming(video_id: str, video_path: str, video_type: str = "v
         _log.exception("Unexpected error in analysis thread for %s", video_id)
         _jobs.set_error(video_id, str(e))
         _push_event(video_id, {"type": "error", "message": str(e)})
+    finally:
+        # Release global concurrency guard so next job can start
+        try:
+            _analysis_semaphore.release()
+        except ValueError:
+            pass  # semaphore already released (shouldn't happen)
 
 
 # ── REST endpoints (keep existing) ──
@@ -111,23 +123,35 @@ async def analyze_video(
     if existing and existing.get("status") == "processing":
         raise ConflictError(message="Analysis already in progress for this video")
 
-    video_path = _find_video(video_id)
+    # ── Global concurrency guard: max 1 simultaneous analysis ──
+    # Prevents OOM from multiple Whisper/OpenCV/Torch model instances.
+    if not _analysis_semaphore.acquire(blocking=False):
+        raise ConflictError(
+            message="Analysis queue is full (max 1 concurrent). "
+                    "Please wait for the current analysis to finish."
+        )
 
-    # Create job record via new API
-    _jobs.create_job(
-        job_id=video_id,
-        type="analysis",
-        input_path=video_path,
-        status="processing",
-    )
+    try:
+        video_path = _find_video(video_id)
 
-    # Create thread-safe queue for SSE events
-    _streams[video_id] = queue.Queue()
+        # Create job record via new API
+        _jobs.create_job(
+            job_id=video_id,
+            type="analysis",
+            input_path=video_path,
+            status="processing",
+        )
 
-    # Run analysis in separate thread so it doesn't block the event loop
-    import concurrent.futures
-    _executor = concurrent.futures.ThreadPoolExecutor(max_workers=1)
-    _executor.submit(_run_analysis_streaming, video_id, video_path, video_type)
+        # Create thread-safe queue for SSE events
+        _streams[video_id] = queue.Queue()
+
+        # Run analysis in separate thread so it doesn't block the event loop
+        import concurrent.futures
+        _executor = concurrent.futures.ThreadPoolExecutor(max_workers=1)
+        _executor.submit(_run_analysis_streaming, video_id, video_path, video_type)
+    except Exception:
+        _analysis_semaphore.release()
+        raise
 
     return AnalysisResponse(video_id=video_id, status="processing")
 

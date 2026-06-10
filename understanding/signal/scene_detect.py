@@ -24,6 +24,9 @@ class SceneDetector:
     def detect(self, video_path: str) -> List[float]:
         """Run PySceneDetect and return candidate boundary timestamps.
 
+        The underlying OpenCV VideoCapture opened by PySceneDetect is
+        released when the context manager exits.
+
         Args:
             video_path: Absolute path to the input video file.
 
@@ -31,20 +34,27 @@ class SceneDetector:
             List of timestamps (in seconds) where scene boundaries are detected.
         """
         video = open_video(video_path)
-        scene_manager = SceneManager()
-        scene_manager.add_detector(
-            ContentDetector(threshold=self.threshold, min_scene_len=self.min_scene_len)
-        )
-        scene_manager.detect_scenes(video)
+        try:
+            scene_manager = SceneManager()
+            scene_manager.add_detector(
+                ContentDetector(threshold=self.threshold, min_scene_len=self.min_scene_len)
+            )
+            scene_manager.detect_scenes(video)
 
-        scene_list = scene_manager.get_scene_list()
-        boundaries: List[float] = []
+            scene_list = scene_manager.get_scene_list()
+            boundaries: List[float] = []
 
-        for scene in scene_list:
-            start_time = scene[0].get_seconds()
-            boundaries.append(start_time)
+            for scene in scene_list:
+                start_time = scene[0].get_seconds()
+                boundaries.append(start_time)
 
-        return boundaries
+            return boundaries
+        finally:
+            # PySceneDetect VideoStream may hold an internal VideoCapture
+            try:
+                video.release()
+            except Exception:
+                pass
 
     def detect_with_frame_numbers(
         self, video_path: str

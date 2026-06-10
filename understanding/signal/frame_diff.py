@@ -1,11 +1,36 @@
 """Frame difference analysis using OpenCV HSV histogram comparison.
 
 Produces a frame-difference curve for downstream adaptive sampling.
+Uses ``opencv_capture`` context manager to guarantee ``.release()``.
 """
+
+import contextlib
+from typing import Any, Dict, Iterator, List, Tuple
 
 import cv2
 import numpy as np
-from typing import Any, Dict, List, Tuple
+
+
+@contextlib.contextmanager
+def opencv_capture(video_path: str) -> Iterator[cv2.VideoCapture]:
+    """Context manager that opens a VideoCapture and releases it on exit.
+
+    Usage::
+
+        with opencv_capture("/path/to/video.mp4") as cap:
+            ret, frame = cap.read()
+            ...
+
+    The capture is always released, even if an exception occurs inside
+    the ``with`` block.
+    """
+    cap = cv2.VideoCapture(video_path)
+    try:
+        if not cap.isOpened():
+            raise FileNotFoundError(f"Cannot open video: {video_path}")
+        yield cap
+    finally:
+        cap.release()
 
 
 class FrameDiffAnalyzer:
@@ -36,33 +61,28 @@ class FrameDiffAnalyzer:
         Raises:
             FileNotFoundError: If video_path does not exist.
         """
-        cap = cv2.VideoCapture(video_path)
-        if not cap.isOpened():
-            raise FileNotFoundError(f"Cannot open video: {video_path}")
-
-        diff_curve: List[float] = []
-        ret, prev_frame = cap.read()
-        if not ret:
-            cap.release()
-            return diff_curve
-
-        prev_hist = self._compute_hsv_histogram(prev_frame)
-
-        skipped = 0
-        while True:
-            ret, frame = cap.read()
+        with opencv_capture(video_path) as cap:
+            diff_curve: List[float] = []
+            ret, prev_frame = cap.read()
             if not ret:
-                break
-            skipped += 1
-            if skipped < self.frame_skip:
-                continue
-            skipped = 0
-            curr_hist = self._compute_hsv_histogram(frame)
-            diff = cv2.compareHist(prev_hist, curr_hist, cv2.HISTCMP_CHISQR)
-            diff_curve.append(float(diff))
-            prev_hist = curr_hist
+                return diff_curve
 
-        cap.release()
+            prev_hist = self._compute_hsv_histogram(prev_frame)
+
+            skipped = 0
+            while True:
+                ret, frame = cap.read()
+                if not ret:
+                    break
+                skipped += 1
+                if skipped < self.frame_skip:
+                    continue
+                skipped = 0
+                curr_hist = self._compute_hsv_histogram(frame)
+                diff = cv2.compareHist(prev_hist, curr_hist, cv2.HISTCMP_CHISQR)
+                diff_curve.append(float(diff))
+                prev_hist = curr_hist
+
         return diff_curve
 
     def calc_diff_curve_with_timestamps(
@@ -77,39 +97,34 @@ class FrameDiffAnalyzer:
             Tuple of (diff_curve, timestamps) where timestamps[i] corresponds
             to the time of frame i+1 (the frame after the diff).
         """
-        cap = cv2.VideoCapture(video_path)
-        if not cap.isOpened():
-            raise FileNotFoundError(f"Cannot open video: {video_path}")
+        with opencv_capture(video_path) as cap:
+            fps = cap.get(cv2.CAP_PROP_FPS)
+            if fps <= 0:
+                fps = 30.0
 
-        fps = cap.get(cv2.CAP_PROP_FPS)
-        if fps <= 0:
-            fps = 30.0
+            diff_curve: List[float] = []
+            timestamps: List[float] = []
 
-        diff_curve: List[float] = []
-        timestamps: List[float] = []
-
-        ret, prev_frame = cap.read()
-        if not ret:
-            cap.release()
-            return diff_curve, timestamps
-
-        prev_hist = self._compute_hsv_histogram(prev_frame)
-        frame_idx = 0
-
-        while True:
-            ret, frame = cap.read()
+            ret, prev_frame = cap.read()
             if not ret:
-                break
-            frame_idx += 1
-            if frame_idx % self.frame_skip != 0:
-                continue
-            curr_hist = self._compute_hsv_histogram(frame)
-            diff = cv2.compareHist(prev_hist, curr_hist, cv2.HISTCMP_CHISQR)
-            diff_curve.append(float(diff))
-            timestamps.append(frame_idx / fps)
-            prev_hist = curr_hist
+                return diff_curve, timestamps
 
-        cap.release()
+            prev_hist = self._compute_hsv_histogram(prev_frame)
+            frame_idx = 0
+
+            while True:
+                ret, frame = cap.read()
+                if not ret:
+                    break
+                frame_idx += 1
+                if frame_idx % self.frame_skip != 0:
+                    continue
+                curr_hist = self._compute_hsv_histogram(frame)
+                diff = cv2.compareHist(prev_hist, curr_hist, cv2.HISTCMP_CHISQR)
+                diff_curve.append(float(diff))
+                timestamps.append(frame_idx / fps)
+                prev_hist = curr_hist
+
         return diff_curve, timestamps
 
     def _compute_hsv_histogram(self, frame: np.ndarray) -> np.ndarray:

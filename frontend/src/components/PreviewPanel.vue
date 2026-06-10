@@ -18,6 +18,7 @@
       <!-- Video info bar -->
       <div v-if="videoId" class="preview__info">
         <span class="preview__info-title">{{ uploadFileName || store.metadata.title || '—' }}</span>
+        <span v-if="etaLabel" class="preview__info-eta">{{ etaLabel }}</span>
         <span class="preview__info-meta">
           {{ store.metadata.resolution.width }}×{{ store.metadata.resolution.height }}
           · {{ fmtDuration(store.metadata.total_duration) }}
@@ -99,6 +100,16 @@ const currentStep = computed(() => {
 });
 const uploadFileName = computed(() => ws.uploadFileName);
 const totalDuration = computed(() => store.metadata.total_duration || 0);
+const etaLabel = computed(() => {
+  if (store.analysisStatus === 'completed' && ws.analysisActualTime) {
+    return '● 实际: ' + ws.analysisActualTime;
+  }
+  if (store.analysisStatus === 'processing' || store.analysisStatus === 'idle') {
+    const eta = ws.fmtEta(store.metadata.total_duration);
+    if (eta && eta !== '—') return '● 预计: ' + eta;
+  }
+  return '';
+});
 
 const fmtDuration = (s: number): string => {
   if (!s || s <= 0) return '—';
@@ -240,6 +251,14 @@ function onDrop(e: DragEvent) {
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
+}
+.preview__info-eta {
+  font-size: 10px;
+  color: var(--accent);
+  font-weight: 500;
+  flex-shrink: 0;
+  margin-left: 8px;
+  font-family: var(--font-mono);
 }
 .preview__info-meta {
   font-size: 10px;

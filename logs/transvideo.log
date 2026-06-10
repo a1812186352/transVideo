@@ -1,0 +1,144 @@
+2026-06-10 12:52:12 | INFO     | root | log_config.py:74 | Logging initialized — file=D:\xiangmuji\transVideo\logs\transvideo.log level=INFO console=True
+2026-06-10 12:52:12 | WARNING  | backend.main | main.py:89 | Found 10 stale analysis job(s) — they can be resumed via checkpoint. Use POST /recovery/analyze/{video_id} to recover.
+2026-06-10 12:52:12 | INFO     | backend.main | main.py:96 |   stale analysis job b68aa3abc17a4082 (status=processing, age=61468s, input=D:\xiangmuji\transVideo\backend\routers\..\..\instances\b68aa3abc17a4082.mp4)
+2026-06-10 12:52:12 | INFO     | backend.main | main.py:96 |   stale analysis job 707ffbe6155e4807 (status=processing, age=61468s, input=D:\xiangmuji\transVideo\backend\routers\..\..\instances\707ffbe6155e4807.mp4)
+2026-06-10 12:52:12 | INFO     | backend.main | main.py:96 |   stale analysis job ba2831d773174578 (status=processing, age=61370s, input=D:\xiangmuji\transVideo\backend\routers\..\..\instances\ba2831d773174578.mov)
+2026-06-10 12:52:12 | INFO     | backend.main | main.py:96 |   stale analysis job b662659f16c541a3 (status=processing, age=61301s, input=D:\xiangmuji\transVideo\backend\routers\..\..\instances\b662659f16c541a3.mov)
+2026-06-10 12:52:12 | INFO     | backend.main | main.py:96 |   stale analysis job 242f514497364054 (status=processing, age=60580s, input=D:\xiangmuji\transVideo\backend\routers\..\..\instances\242f514497364054.mov)
+2026-06-10 12:52:12 | INFO     | backend.main | main.py:96 |   stale analysis job 2a91dc9b4fda477b (status=processing, age=60580s, input=D:\xiangmuji\transVideo\backend\routers\..\..\instances\2a91dc9b4fda477b.mov)
+2026-06-10 12:52:12 | INFO     | backend.main | main.py:96 |   stale analysis job 92f67a072dd14006 (status=processing, age=59938s, input=D:\xiangmuji\transVideo\backend\routers\..\..\instances\92f67a072dd14006.mov)
+2026-06-10 12:52:12 | INFO     | backend.main | main.py:96 |   stale analysis job 18e7088c15974c04 (status=processing, age=59868s, input=D:\xiangmuji\transVideo\backend\routers\..\..\instances\18e7088c15974c04.mov)
+2026-06-10 12:52:12 | INFO     | backend.main | main.py:96 |   stale analysis job f8ed0b9c0cdd43d1 (status=processing, age=59089s, input=D:\xiangmuji\transVideo\backend\routers\..\..\instances\f8ed0b9c0cdd43d1.mov)
+2026-06-10 12:52:12 | INFO     | backend.main | main.py:96 |   stale analysis job eb9cc6dfbe8848cb (status=processing, age=1612s, input=D:\xiangmuji\transVideo\backend\routers\..\..\instances\eb9cc6dfbe8848cb.mov)
+2026-06-10 12:52:12 | INFO     | backend.main | main.py:118 | Export store: no stale jobs.
+2026-06-10 12:52:12 | INFO     | backend.main | main.py:121 | Startup recovery scan complete.
+2026-06-10 12:56:51 | INFO     | root | log_config.py:74 | Logging initialized — file=D:\xiangmuji\transVideo\logs\transvideo.log level=INFO console=True
+2026-06-10 12:56:51 | WARNING  | backend.main | main.py:89 | Found 10 stale analysis job(s) — they can be resumed via checkpoint. Use POST /recovery/analyze/{video_id} to recover.
+2026-06-10 12:56:51 | INFO     | backend.main | main.py:96 |   stale analysis job b68aa3abc17a4082 (status=processing, age=61747s, input=D:\xiangmuji\transVideo\backend\routers\..\..\instances\b68aa3abc17a4082.mp4)
+2026-06-10 12:56:51 | INFO     | backend.main | main.py:96 |   stale analysis job 707ffbe6155e4807 (status=processing, age=61747s, input=D:\xiangmuji\transVideo\backend\routers\..\..\instances\707ffbe6155e4807.mp4)
+2026-06-10 12:56:51 | INFO     | backend.main | main.py:96 |   stale analysis job ba2831d773174578 (status=processing, age=61649s, input=D:\xiangmuji\transVideo\backend\routers\..\..\instances\ba2831d773174578.mov)
+2026-06-10 12:56:51 | INFO     | backend.main | main.py:96 |   stale analysis job b662659f16c541a3 (status=processing, age=61580s, input=D:\xiangmuji\transVideo\backend\routers\..\..\instances\b662659f16c541a3.mov)
+2026-06-10 12:56:51 | INFO     | backend.main | main.py:96 |   stale analysis job 242f514497364054 (status=processing, age=60859s, input=D:\xiangmuji\transVideo\backend\routers\..\..\instances\242f514497364054.mov)
+2026-06-10 12:56:51 | INFO     | backend.main | main.py:96 |   stale analysis job 2a91dc9b4fda477b (status=processing, age=60859s, input=D:\xiangmuji\transVideo\backend\routers\..\..\instances\2a91dc9b4fda477b.mov)
+2026-06-10 12:56:51 | INFO     | backend.main | main.py:96 |   stale analysis job 92f67a072dd14006 (status=processing, age=60217s, input=D:\xiangmuji\transVideo\backend\routers\..\..\instances\92f67a072dd14006.mov)
+2026-06-10 12:56:51 | INFO     | backend.main | main.py:96 |   stale analysis job 18e7088c15974c04 (status=processing, age=60147s, input=D:\xiangmuji\transVideo\backend\routers\..\..\instances\18e7088c15974c04.mov)
+2026-06-10 12:56:51 | INFO     | backend.main | main.py:96 |   stale analysis job f8ed0b9c0cdd43d1 (status=processing, age=59368s, input=D:\xiangmuji\transVideo\backend\routers\..\..\instances\f8ed0b9c0cdd43d1.mov)
+2026-06-10 12:56:51 | INFO     | backend.main | main.py:96 |   stale analysis job eb9cc6dfbe8848cb (status=processing, age=1891s, input=D:\xiangmuji\transVideo\backend\routers\..\..\instances\eb9cc6dfbe8848cb.mov)
+2026-06-10 12:56:51 | INFO     | backend.main | main.py:118 | Export store: no stale jobs.
+2026-06-10 12:56:51 | INFO     | backend.main | main.py:121 | Startup recovery scan complete.
+2026-06-10 13:06:51 | INFO     | root | log_config.py:74 | Logging initialized — file=D:\xiangmuji\transVideo\logs\transvideo.log level=INFO console=True
+2026-06-10 13:06:52 | INFO     | root | log_config.py:74 | Logging initialized — file=D:\xiangmuji\transVideo\logs\transvideo.log level=INFO console=True
+2026-06-10 13:06:52 | WARNING  | backend.main | main.py:89 | Found 10 stale analysis job(s) — they can be resumed via checkpoint. Use POST /recovery/analyze/{video_id} to recover.
+2026-06-10 13:06:52 | INFO     | backend.main | main.py:96 |   stale analysis job b68aa3abc17a4082 (status=processing, age=62348s, input=D:\xiangmuji\transVideo\backend\routers\..\..\instances\b68aa3abc17a4082.mp4)
+2026-06-10 13:06:52 | INFO     | backend.main | main.py:96 |   stale analysis job 707ffbe6155e4807 (status=processing, age=62348s, input=D:\xiangmuji\transVideo\backend\routers\..\..\instances\707ffbe6155e4807.mp4)
+2026-06-10 13:06:52 | INFO     | backend.main | main.py:96 |   stale analysis job ba2831d773174578 (status=processing, age=62250s, input=D:\xiangmuji\transVideo\backend\routers\..\..\instances\ba2831d773174578.mov)
+2026-06-10 13:06:52 | INFO     | backend.main | main.py:96 |   stale analysis job b662659f16c541a3 (status=processing, age=62181s, input=D:\xiangmuji\transVideo\backend\routers\..\..\instances\b662659f16c541a3.mov)
+2026-06-10 13:06:52 | INFO     | backend.main | main.py:96 |   stale analysis job 242f514497364054 (status=processing, age=61460s, input=D:\xiangmuji\transVideo\backend\routers\..\..\instances\242f514497364054.mov)
+2026-06-10 13:06:52 | INFO     | backend.main | main.py:96 |   stale analysis job 2a91dc9b4fda477b (status=processing, age=61460s, input=D:\xiangmuji\transVideo\backend\routers\..\..\instances\2a91dc9b4fda477b.mov)
+2026-06-10 13:06:52 | INFO     | backend.main | main.py:96 |   stale analysis job 92f67a072dd14006 (status=processing, age=60818s, input=D:\xiangmuji\transVideo\backend\routers\..\..\instances\92f67a072dd14006.mov)
+2026-06-10 13:06:52 | INFO     | backend.main | main.py:96 |   stale analysis job 18e7088c15974c04 (status=processing, age=60748s, input=D:\xiangmuji\transVideo\backend\routers\..\..\instances\18e7088c15974c04.mov)
+2026-06-10 13:06:52 | INFO     | backend.main | main.py:96 |   stale analysis job f8ed0b9c0cdd43d1 (status=processing, age=59969s, input=D:\xiangmuji\transVideo\backend\routers\..\..\instances\f8ed0b9c0cdd43d1.mov)
+2026-06-10 13:06:52 | INFO     | backend.main | main.py:96 |   stale analysis job eb9cc6dfbe8848cb (status=processing, age=2492s, input=D:\xiangmuji\transVideo\backend\routers\..\..\instances\eb9cc6dfbe8848cb.mov)
+2026-06-10 13:06:52 | INFO     | backend.main | main.py:118 | Export store: no stale jobs.
+2026-06-10 13:06:52 | INFO     | backend.main | main.py:121 | Startup recovery scan complete.
+2026-06-10 13:06:54 | INFO     | root | log_config.py:74 | Logging initialized — file=D:\xiangmuji\transVideo\logs\transvideo.log level=INFO console=True
+2026-06-10 13:06:54 | WARNING  | backend.main | main.py:89 | Found 10 stale analysis job(s) — they can be resumed via checkpoint. Use POST /recovery/analyze/{video_id} to recover.
+2026-06-10 13:06:54 | INFO     | backend.main | main.py:96 |   stale analysis job b68aa3abc17a4082 (status=processing, age=62349s, input=D:\xiangmuji\transVideo\backend\routers\..\..\instances\b68aa3abc17a4082.mp4)
+2026-06-10 13:06:54 | INFO     | backend.main | main.py:96 |   stale analysis job 707ffbe6155e4807 (status=processing, age=62349s, input=D:\xiangmuji\transVideo\backend\routers\..\..\instances\707ffbe6155e4807.mp4)
+2026-06-10 13:06:54 | INFO     | backend.main | main.py:96 |   stale analysis job ba2831d773174578 (status=processing, age=62251s, input=D:\xiangmuji\transVideo\backend\routers\..\..\instances\ba2831d773174578.mov)
+2026-06-10 13:06:54 | INFO     | backend.main | main.py:96 |   stale analysis job b662659f16c541a3 (status=processing, age=62182s, input=D:\xiangmuji\transVideo\backend\routers\..\..\instances\b662659f16c541a3.mov)
+2026-06-10 13:06:54 | INFO     | backend.main | main.py:96 |   stale analysis job 242f514497364054 (status=processing, age=61461s, input=D:\xiangmuji\transVideo\backend\routers\..\..\instances\242f514497364054.mov)
+2026-06-10 13:06:54 | INFO     | backend.main | main.py:96 |   stale analysis job 2a91dc9b4fda477b (status=processing, age=61461s, input=D:\xiangmuji\transVideo\backend\routers\..\..\instances\2a91dc9b4fda477b.mov)
+2026-06-10 13:06:54 | INFO     | backend.main | main.py:96 |   stale analysis job 92f67a072dd14006 (status=processing, age=60819s, input=D:\xiangmuji\transVideo\backend\routers\..\..\instances\92f67a072dd14006.mov)
+2026-06-10 13:06:54 | INFO     | backend.main | main.py:96 |   stale analysis job 18e7088c15974c04 (status=processing, age=60749s, input=D:\xiangmuji\transVideo\backend\routers\..\..\instances\18e7088c15974c04.mov)
+2026-06-10 13:06:54 | INFO     | backend.main | main.py:96 |   stale analysis job f8ed0b9c0cdd43d1 (status=processing, age=59970s, input=D:\xiangmuji\transVideo\backend\routers\..\..\instances\f8ed0b9c0cdd43d1.mov)
+2026-06-10 13:06:54 | INFO     | backend.main | main.py:96 |   stale analysis job eb9cc6dfbe8848cb (status=processing, age=2493s, input=D:\xiangmuji\transVideo\backend\routers\..\..\instances\eb9cc6dfbe8848cb.mov)
+2026-06-10 13:06:54 | INFO     | backend.main | main.py:118 | Export store: no stale jobs.
+2026-06-10 13:06:54 | INFO     | backend.main | main.py:121 | Startup recovery scan complete.
+2026-06-10 13:06:56 | INFO     | backend.routers.analysis | analysis.py:55 | Analysis thread started for 14445ca37d06484a (type=commercial)
+2026-06-10 13:07:00 | INFO     | understanding.signal.video_classifier | video_classifier.py:143 | CLIP model not cached — downloading openai/clip-vit-base-patch32 → D:\xiangmuji\transVideo\understanding\models\clip_vitb32 (timeout 90s)
+2026-06-10 13:07:05 | WARNING  | huggingface_hub.utils._http | _http.py:904 | Warning: You are sending unauthenticated requests to the HF Hub. Please set a HF_TOKEN to enable higher rate limits and faster downloads.
+2026-06-10 13:07:56 | WARNING  | understanding.signal.video_classifier | video_classifier.py:171 | CLIP download timed out after 90s or failed
+2026-06-10 13:07:56 | INFO     | understanding.signal.video_classifier | video_classifier.py:483 | Classifier created (model not cached — will use heuristic)
+2026-06-10 13:07:57 | INFO     | pyscenedetect | scene_manager.py:547 | Detecting scenes...
+2026-06-10 13:32:28 | INFO     | root | log_config.py:74 | Logging initialized — file=D:\xiangmuji\transVideo\logs\transvideo.log level=INFO console=True
+2026-06-10 13:32:28 | WARNING  | backend.main | main.py:89 | Found 11 stale analysis job(s) — they can be resumed via checkpoint. Use POST /recovery/analyze/{video_id} to recover.
+2026-06-10 13:32:28 | INFO     | backend.main | main.py:96 |   stale analysis job b68aa3abc17a4082 (status=processing, age=63883s, input=D:\xiangmuji\transVideo\backend\routers\..\..\instances\b68aa3abc17a4082.mp4)
+2026-06-10 13:32:28 | INFO     | backend.main | main.py:96 |   stale analysis job 707ffbe6155e4807 (status=processing, age=63883s, input=D:\xiangmuji\transVideo\backend\routers\..\..\instances\707ffbe6155e4807.mp4)
+2026-06-10 13:32:28 | INFO     | backend.main | main.py:96 |   stale analysis job ba2831d773174578 (status=processing, age=63785s, input=D:\xiangmuji\transVideo\backend\routers\..\..\instances\ba2831d773174578.mov)
+2026-06-10 13:32:28 | INFO     | backend.main | main.py:96 |   stale analysis job b662659f16c541a3 (status=processing, age=63716s, input=D:\xiangmuji\transVideo\backend\routers\..\..\instances\b662659f16c541a3.mov)
+2026-06-10 13:32:28 | INFO     | backend.main | main.py:96 |   stale analysis job 242f514497364054 (status=processing, age=62995s, input=D:\xiangmuji\transVideo\backend\routers\..\..\instances\242f514497364054.mov)
+2026-06-10 13:32:28 | INFO     | backend.main | main.py:96 |   stale analysis job 2a91dc9b4fda477b (status=processing, age=62995s, input=D:\xiangmuji\transVideo\backend\routers\..\..\instances\2a91dc9b4fda477b.mov)
+2026-06-10 13:32:28 | INFO     | backend.main | main.py:96 |   stale analysis job 92f67a072dd14006 (status=processing, age=62353s, input=D:\xiangmuji\transVideo\backend\routers\..\..\instances\92f67a072dd14006.mov)
+2026-06-10 13:32:28 | INFO     | backend.main | main.py:96 |   stale analysis job 18e7088c15974c04 (status=processing, age=62283s, input=D:\xiangmuji\transVideo\backend\routers\..\..\instances\18e7088c15974c04.mov)
+2026-06-10 13:32:28 | INFO     | backend.main | main.py:96 |   stale analysis job f8ed0b9c0cdd43d1 (status=processing, age=61504s, input=D:\xiangmuji\transVideo\backend\routers\..\..\instances\f8ed0b9c0cdd43d1.mov)
+2026-06-10 13:32:28 | INFO     | backend.main | main.py:96 |   stale analysis job eb9cc6dfbe8848cb (status=processing, age=4027s, input=D:\xiangmuji\transVideo\backend\routers\..\..\instances\eb9cc6dfbe8848cb.mov)
+2026-06-10 13:32:28 | INFO     | backend.main | main.py:96 |   stale analysis job 14445ca37d06484a (status=processing, age=1532s, input=D:\xiangmuji\transVideo\backend\routers\..\..\instances\14445ca37d06484a.mov)
+2026-06-10 13:32:28 | INFO     | backend.main | main.py:118 | Export store: no stale jobs.
+2026-06-10 13:32:28 | INFO     | backend.main | main.py:121 | Startup recovery scan complete.
+2026-06-10 13:34:45 | INFO     | root | log_config.py:74 | Logging initialized — file=D:\xiangmuji\transVideo\logs\transvideo.log level=INFO console=True
+2026-06-10 13:36:30 | INFO     | root | log_config.py:74 | Logging initialized — file=D:\xiangmuji\transVideo\logs\transvideo.log level=INFO console=True
+2026-06-10 13:36:30 | WARNING  | backend.main | main.py:89 | Found 11 stale analysis job(s) — they can be resumed via checkpoint. Use POST /recovery/analyze/{video_id} to recover.
+2026-06-10 13:36:30 | INFO     | backend.main | main.py:96 |   stale analysis job b68aa3abc17a4082 (status=processing, age=64126s, input=D:\xiangmuji\transVideo\backend\routers\..\..\instances\b68aa3abc17a4082.mp4)
+2026-06-10 13:36:30 | INFO     | backend.main | main.py:96 |   stale analysis job 707ffbe6155e4807 (status=processing, age=64126s, input=D:\xiangmuji\transVideo\backend\routers\..\..\instances\707ffbe6155e4807.mp4)
+2026-06-10 13:36:30 | INFO     | backend.main | main.py:96 |   stale analysis job ba2831d773174578 (status=processing, age=64028s, input=D:\xiangmuji\transVideo\backend\routers\..\..\instances\ba2831d773174578.mov)
+2026-06-10 13:36:30 | INFO     | backend.main | main.py:96 |   stale analysis job b662659f16c541a3 (status=processing, age=63959s, input=D:\xiangmuji\transVideo\backend\routers\..\..\instances\b662659f16c541a3.mov)
+2026-06-10 13:36:30 | INFO     | backend.main | main.py:96 |   stale analysis job 242f514497364054 (status=processing, age=63238s, input=D:\xiangmuji\transVideo\backend\routers\..\..\instances\242f514497364054.mov)
+2026-06-10 13:36:30 | INFO     | backend.main | main.py:96 |   stale analysis job 2a91dc9b4fda477b (status=processing, age=63238s, input=D:\xiangmuji\transVideo\backend\routers\..\..\instances\2a91dc9b4fda477b.mov)
+2026-06-10 13:36:30 | INFO     | backend.main | main.py:96 |   stale analysis job 92f67a072dd14006 (status=processing, age=62596s, input=D:\xiangmuji\transVideo\backend\routers\..\..\instances\92f67a072dd14006.mov)
+2026-06-10 13:36:30 | INFO     | backend.main | main.py:96 |   stale analysis job 18e7088c15974c04 (status=processing, age=62526s, input=D:\xiangmuji\transVideo\backend\routers\..\..\instances\18e7088c15974c04.mov)
+2026-06-10 13:36:30 | INFO     | backend.main | main.py:96 |   stale analysis job f8ed0b9c0cdd43d1 (status=processing, age=61747s, input=D:\xiangmuji\transVideo\backend\routers\..\..\instances\f8ed0b9c0cdd43d1.mov)
+2026-06-10 13:36:30 | INFO     | backend.main | main.py:96 |   stale analysis job eb9cc6dfbe8848cb (status=processing, age=4270s, input=D:\xiangmuji\transVideo\backend\routers\..\..\instances\eb9cc6dfbe8848cb.mov)
+2026-06-10 13:36:30 | INFO     | backend.main | main.py:96 |   stale analysis job 14445ca37d06484a (status=processing, age=1775s, input=D:\xiangmuji\transVideo\backend\routers\..\..\instances\14445ca37d06484a.mov)
+2026-06-10 13:36:30 | INFO     | backend.main | main.py:118 | Export store: no stale jobs.
+2026-06-10 13:36:30 | INFO     | backend.main | main.py:121 | Startup recovery scan complete.
+2026-06-10 13:37:49 | INFO     | root | log_config.py:74 | Logging initialized — file=D:\xiangmuji\transVideo\logs\transvideo.log level=INFO console=True
+2026-06-10 13:37:49 | WARNING  | backend.main | main.py:89 | Found 11 stale analysis job(s) — they can be resumed via checkpoint. Use POST /recovery/analyze/{video_id} to recover.
+2026-06-10 13:37:49 | INFO     | backend.main | main.py:96 |   stale analysis job b68aa3abc17a4082 (status=processing, age=64205s, input=D:\xiangmuji\transVideo\backend\routers\..\..\instances\b68aa3abc17a4082.mp4)
+2026-06-10 13:37:49 | INFO     | backend.main | main.py:96 |   stale analysis job 707ffbe6155e4807 (status=processing, age=64205s, input=D:\xiangmuji\transVideo\backend\routers\..\..\instances\707ffbe6155e4807.mp4)
+2026-06-10 13:37:49 | INFO     | backend.main | main.py:96 |   stale analysis job ba2831d773174578 (status=processing, age=64107s, input=D:\xiangmuji\transVideo\backend\routers\..\..\instances\ba2831d773174578.mov)
+2026-06-10 13:37:49 | INFO     | backend.main | main.py:96 |   stale analysis job b662659f16c541a3 (status=processing, age=64038s, input=D:\xiangmuji\transVideo\backend\routers\..\..\instances\b662659f16c541a3.mov)
+2026-06-10 13:37:49 | INFO     | backend.main | main.py:96 |   stale analysis job 242f514497364054 (status=processing, age=63317s, input=D:\xiangmuji\transVideo\backend\routers\..\..\instances\242f514497364054.mov)
+2026-06-10 13:37:49 | INFO     | backend.main | main.py:96 |   stale analysis job 2a91dc9b4fda477b (status=processing, age=63317s, input=D:\xiangmuji\transVideo\backend\routers\..\..\instances\2a91dc9b4fda477b.mov)
+2026-06-10 13:37:49 | INFO     | backend.main | main.py:96 |   stale analysis job 92f67a072dd14006 (status=processing, age=62675s, input=D:\xiangmuji\transVideo\backend\routers\..\..\instances\92f67a072dd14006.mov)
+2026-06-10 13:37:49 | INFO     | backend.main | main.py:96 |   stale analysis job 18e7088c15974c04 (status=processing, age=62605s, input=D:\xiangmuji\transVideo\backend\routers\..\..\instances\18e7088c15974c04.mov)
+2026-06-10 13:37:49 | INFO     | backend.main | main.py:96 |   stale analysis job f8ed0b9c0cdd43d1 (status=processing, age=61826s, input=D:\xiangmuji\transVideo\backend\routers\..\..\instances\f8ed0b9c0cdd43d1.mov)
+2026-06-10 13:37:49 | INFO     | backend.main | main.py:96 |   stale analysis job eb9cc6dfbe8848cb (status=processing, age=4349s, input=D:\xiangmuji\transVideo\backend\routers\..\..\instances\eb9cc6dfbe8848cb.mov)
+2026-06-10 13:37:49 | INFO     | backend.main | main.py:96 |   stale analysis job 14445ca37d06484a (status=processing, age=1854s, input=D:\xiangmuji\transVideo\backend\routers\..\..\instances\14445ca37d06484a.mov)
+2026-06-10 13:37:49 | INFO     | backend.main | main.py:118 | Export store: no stale jobs.
+2026-06-10 13:37:49 | INFO     | backend.main | main.py:121 | Startup recovery scan complete.
+2026-06-10 13:44:33 | INFO     | backend.routers.analysis | analysis.py:55 | Analysis thread started for 8a61da8b6e574a86 (type=vlog)
+2026-06-10 13:44:34 | INFO     | pyscenedetect | scene_manager.py:547 | Detecting scenes...
+2026-06-10 14:08:01 | WARNING  | backend.middleware.error_handler | error_handler.py:183 | AppError code=NOT_FOUND status=404 recoverable=False: No analysis job found for status
+2026-06-10 14:16:06 | INFO     | root | log_config.py:74 | Logging initialized — file=D:\xiangmuji\transVideo\logs\transvideo.log level=INFO console=True
+2026-06-10 14:17:53 | INFO     | backend.routers.analysis | analysis.py:55 | Analysis thread started for 83dc7f2c8b4b4931 (type=commercial)
+2026-06-10 14:17:54 | INFO     | pyscenedetect | scene_manager.py:547 | Detecting scenes...
+2026-06-10 14:18:02 | WARNING  | understanding.signal.vad_detect | vad_detect.py:58 | silero-vad load failed (EOF when reading a line) — gate disabled
+2026-06-10 14:18:17 | INFO     | faster_whisper | transcribe.py:881 | Processing audio with duration 00:31.183
+2026-06-10 14:18:20 | INFO     | faster_whisper | transcribe.py:948 | Detected language 'en' with probability 0.55
+2026-06-10 14:19:40 | INFO     | understanding.signal.visual_features | visual_features.py:426 | Loading YOLOv8n on cpu ...
+2026-06-10 14:19:40 | INFO     | understanding.signal.visual_features | visual_features.py:428 | YOLOv8n loaded on cpu
+2026-06-10 14:19:55 | INFO     | understanding.pipeline_orchestrator | pipeline_orchestrator.py:775 | Visual features from opencv: 53 frames, 0 descriptions (api_time=0.00s)
+2026-06-10 14:19:55 | INFO     | backend.routers.analysis | analysis.py:63 | Pipeline done for 83dc7f2c8b4b4931, modules: 6
+2026-06-10 14:32:13 | INFO     | backend.routers.analysis | analysis.py:55 | Analysis thread started for 0e6528e031454bfd (type=commercial)
+2026-06-10 14:32:13 | INFO     | pyscenedetect | scene_manager.py:547 | Detecting scenes...
+2026-06-10 14:32:13 | WARNING  | understanding.pipeline_orchestrator | pipeline_orchestrator.py:445 | Audio analysis failed: Cannot extract audio from D:\xiangmuji\transVideo\backend\routers\..\..\instances\0e6528e031454bfd.mp4
+2026-06-10 14:32:13 | WARNING  | understanding.signal.vad_detect | vad_detect.py:58 | silero-vad load failed (EOF when reading a line) — gate disabled
+2026-06-10 14:32:33 | WARNING  | understanding.pipeline_orchestrator | pipeline_orchestrator.py:433 | Audio transcription failed: tuple index out of range
+2026-06-10 14:32:37 | WARNING  | understanding.signal.ocr_extract | ocr_extract.py:69 | OCR: 0/1 frames have text — may indicate OCR engine issue or text-free frames
+2026-06-10 14:32:39 | WARNING  | understanding.signal.ocr_extract | ocr_extract.py:69 | OCR: 0/8 frames have text — may indicate OCR engine issue or text-free frames
+2026-06-10 14:32:42 | INFO     | understanding.signal.visual_features | visual_features.py:426 | Loading YOLOv8n on cpu ...
+2026-06-10 14:32:42 | INFO     | understanding.signal.visual_features | visual_features.py:428 | YOLOv8n loaded on cpu
+2026-06-10 14:32:44 | INFO     | understanding.pipeline_orchestrator | pipeline_orchestrator.py:775 | Visual features from opencv: 9 frames, 0 descriptions (api_time=0.00s)
+2026-06-10 14:32:44 | INFO     | understanding.pipeline_orchestrator | pipeline_orchestrator.py:833 | audio_data missing energy_curve, falling back to diff_curve
+2026-06-10 14:32:44 | INFO     | backend.routers.analysis | analysis.py:63 | Pipeline done for 0e6528e031454bfd, modules: 5
+2026-06-10 14:41:27 | INFO     | root | log_config.py:74 | Logging initialized — file=D:\xiangmuji\transVideo\logs\transvideo.log level=INFO console=True
+2026-06-10 14:45:04 | INFO     | root | log_config.py:74 | Logging initialized — file=D:\xiangmuji\transVideo\logs\transvideo.log level=INFO console=True
+2026-06-10 14:46:32 | INFO     | root | log_config.py:74 | Logging initialized — file=D:\xiangmuji\transVideo\logs\transvideo.log level=INFO console=True
+2026-06-10 14:51:02 | INFO     | root | log_config.py:74 | Logging initialized — file=D:\xiangmuji\transVideo\logs\transvideo.log level=INFO console=True
+2026-06-10 14:51:09 | INFO     | root | log_config.py:74 | Logging initialized — file=D:\xiangmuji\transVideo\logs\transvideo.log level=INFO console=True
+2026-06-10 14:51:17 | INFO     | root | log_config.py:74 | Logging initialized — file=D:\xiangmuji\transVideo\logs\transvideo.log level=INFO console=True
+{"timestamp": "2026-06-10T14:53:54.925402", "level": "INFO", "logger": "root", "module": "log_config", "line": 75, "message": "Logging initialized — file=D:\\xiangmuji\\transVideo\\logs\\transvideo.log level=INFO console=True"}
+{"timestamp": "2026-06-10T14:53:54.933383", "level": "INFO", "logger": "test", "module": "", "line": 0, "message": "Structured logger works", "video_id": "abc", "elapsed_ms": 42}
+{"timestamp": "2026-06-10T14:54:43.705860", "level": "INFO", "logger": "root", "module": "log_config", "line": 75, "message": "Logging initialized — file=D:\\xiangmuji\\transVideo\\logs\\transvideo.log level=INFO console=True"}
+{"timestamp": "2026-06-10T14:55:36.611219", "level": "INFO", "logger": "root", "module": "log_config", "line": 75, "message": "Logging initialized — file=D:\\xiangmuji\\transVideo\\logs\\transvideo.log level=INFO console=True"}

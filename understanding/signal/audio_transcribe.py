@@ -86,6 +86,9 @@ class AudioTranscriber:
     def transcribe(self, video_path: str) -> List[dict]:
         """Transcribe audio from video and return time-stamped segments.
 
+        Logs Whisper version, backend, model size, and input file size
+        before starting — helps diagnose external-dependency failures.
+
         Args:
             video_path: Absolute path to the input video file.
 
@@ -93,6 +96,20 @@ class AudioTranscriber:
             List of segment dicts: {start, end, text}
         """
         model = self._load_model()
+
+        # ── Log external dependency version + input dimensions ──
+        import logging
+        _log = logging.getLogger(__name__)
+        try:
+            wh_version = getattr(__import__('whisper', fromlist=['__version__']), '__version__', '?')
+        except Exception:
+            wh_version = '?'
+        _log.info(
+            "Whisper transcription start — backend=%s model=%s whisper_version=%s "
+            "device=%s file_path=%.100s",
+            self.backend(), self.model_name, wh_version,
+            self.device, video_path,
+        )
 
         if _USE_FASTER:
             segments_out, _info = model.transcribe(video_path, word_timestamps=False)

@@ -12,6 +12,9 @@ from a previous ungraceful shutdown.  Analysis jobs are kept as-is
 import logging
 import os
 import sys
+import time
+import traceback
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import Dict, List
 
@@ -23,10 +26,165 @@ if str(_project_root) not in sys.path:
 
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
-from backend.routers import upload, analysis, export, config, materials
+from backend.log_config import setup_logging
+from backend.routers import upload, analysis, export, materials
 from backend.middleware.error_handler import register_error_handlers
 
+# Initialize logging (console + rotating file handler)
+_log_path = setup_logging()
+
 _log = logging.getLogger(__name__)
+
+# ═══════════════════════════════════════════════════════════════════
+#  sys.excepthook — crash dump to logs/crash_dumps/
+# ═══════════════════════════════════════════════════════════════════
+
+_CRASH_DIR = os.path.join(_project_root, "logs", "crash_dumps")
+
+
+def _install_crash_hook() -> None:
+    """Install a global exception hook that saves a crash dump.
+
+    When an unhandled exception escapes the event loop, this hook:
+    1. Writes the full Python stack trace to ``logs/crash_dumps/``
+       with a timestamped filename.
+    2. Logs the error at CRITICAL level with structured context.
+    3. Attempts to dump memory stats (largest objects) if ``objgraph``
+       is installed.
+    """
+    os.makedirs(_CRASH_DIR, exist_ok=True)
+
+    def _crash_hook(exc_type, exc_value, exc_tb):
+        timestamp = datetime.now(timezone.utc).strftime("%Y%m%d_%H%M%S")
+        dump_path = os.path.join(_CRASH_DIR, f"crash_{timestamp}.txt")
+
+        with open(dump_path, "w", encoding="utf-8") as f:
+            f.write(f"Crash time   : {timestamp}\n")
+            f.write(f"Exception    : {exc_type.__name__}\n")
+            f.write(f"Value        : {exc_value}\n")
+            f.write(f"{'='*60}\n")
+            traceback.print_exception(exc_type, exc_value, exc_tb, file=f)
+
+            # Attempt objgraph memory snapshot
+            try:
+                import objgraph
+                f.write(f"\n{'='*60}\nTop 20 objects by count:\n")
+                objgraph.show_most_common_types(limit=20, file=f)
+            except ImportError:
+                f.write("\n(objgraph not installed — skip memory snapshot)\n")
+
+            # GC stats
+            try:
+                import gc
+                f.write(f"\nGC tracked objects: {len(gc.get_objects())}\n")
+            except Exception:
+                pass
+
+        _log.critical(
+            "UNHANDLED EXCEPTION — crash dump saved to %s",
+            dump_path,
+            extra={"structured_fields": {
+                "crash_dump": dump_path,
+                "exception": exc_type.__name__,
+            }},
+        )
+
+    sys.excepthook = _crash_hook
+
+
+_install_crash_hook()
+
+
+# ═══════════════════════════════════════════════════════════════════
+#  Prometheus /metrics endpoint (lightweight, no external dependency)
+# ═══════════════════════════════════════════════════════════════════
+
+_METRICS: Dict[str, object] = {
+    "app_start_time": time.time(),
+    "analysis_starts": 0,
+    "analysis_failures": 0,
+    "analysis_elapsed_ms": [],     # rolling window for P50/P95/P99
+    "ocr_frames_total": 0,
+    "ocr_skipped_blurry": 0,
+    "export_starts": 0,
+    "export_failures": 0,
+    "concurrent_analysis_max": 1,
+}
+
+_LATENCY_BUCKETS = [10_000, 30_000, 60_000, 120_000, 300_000, 600_000, 1_800_000]
+
+
+def _percentile(sorted_data: List[float], pct: float) -> float:
+    """Compute P* percentile from sorted list."""
+    if not sorted_data:
+        return 0.0
+    n = len(sorted_data)
+    idx = max(0, min(n - 1, int(n * pct / 100)))
+    return sorted_data[idx]
+
+
+def _build_metrics_text() -> str:
+    """Return Prometheus exposition-format metrics."""
+    lines: List[str] = []
+    app_start = _METRICS.get("app_start_time", time.time())
+    lines.append(f"# HELP transvideo_app_start_time Unix epoch of app start")
+    lines.append(f"# TYPE transvideo_app_start_time gauge")
+    lines.append(f"transvideo_app_start_time {app_start:.0f}")
+
+    lines.append(f"# HELP transvideo_analysis_starts_total Total analysis jobs started")
+    lines.append(f"# TYPE transvideo_analysis_starts_total counter")
+    lines.append(f"transvideo_analysis_starts_total {_METRICS.get('analysis_starts', 0)}")
+
+    lines.append(f"# HELP transvideo_analysis_failures_total Total analysis failures")
+    lines.append(f"# TYPE transvideo_analysis_failures_total counter")
+    lines.append(f"transvideo_analysis_failures_total {_METRICS.get('analysis_failures', 0)}")
+
+    # Latency percentiles
+    elapsed = _METRICS.get("analysis_elapsed_ms", [])
+    if elapsed:
+        sorted_elapsed = sorted(elapsed)
+        p50 = _percentile(sorted_elapsed, 50)
+        p95 = _percentile(sorted_elapsed, 95)
+        p99 = _percentile(sorted_elapsed, 99)
+    else:
+        p50 = p95 = p99 = 0.0
+
+    lines.append(f"# HELP transvideo_analysis_duration_seconds Analysis duration percentiles")
+    lines.append(f"# TYPE transvideo_analysis_duration_seconds gauge")
+    lines.append(f'transvideo_analysis_duration_seconds{{quantile="0.5"}} {p50 / 1000:.3f}')
+    lines.append(f'transvideo_analysis_duration_seconds{{quantile="0.95"}} {p95 / 1000:.3f}')
+    lines.append(f'transvideo_analysis_duration_seconds{{quantile="0.99"}} {p99 / 1000:.3f}')
+
+    lines.append(f"# HELP transvideo_ocr_frames_total Frames submitted to OCR")
+    lines.append(f"# TYPE transvideo_ocr_frames_total counter")
+    lines.append(f"transvideo_ocr_frames_total {_METRICS.get('ocr_frames_total', 0)}")
+
+    lines.append(f"# HELP transvideo_ocr_skipped_blurry_total Blurry frames skipped by OCR pre-filter")
+    lines.append(f"# TYPE transvideo_ocr_skipped_blurry_total counter")
+    lines.append(f"transvideo_ocr_skipped_blurry_total {_METRICS.get('ocr_skipped_blurry', 0)}")
+
+    lines.append(f"# HELP transvideo_export_starts_total Export jobs started")
+    lines.append(f"# TYPE transvideo_export_starts_total counter")
+    lines.append(f"transvideo_export_starts_total {_METRICS.get('export_starts', 0)}")
+
+    lines.append(f"# HELP transvideo_export_failures_total Export failures")
+    lines.append(f"# TYPE transvideo_export_failures_total counter")
+    lines.append(f"transvideo_export_failures_total {_METRICS.get('export_failures', 0)}")
+
+    # Queue depth (from analysis router)
+    try:
+        from backend.routers.analysis import _analysis_semaphore
+        q_depth = 0 if _analysis_semaphore.acquire(blocking=False) else 1
+        if not q_depth:
+            _analysis_semaphore.release()
+    except Exception:
+        q_depth = -1
+    lines.append(f"# HELP transvideo_analysis_queue_depth Current analysis queue depth")
+    lines.append(f"# TYPE transvideo_analysis_queue_depth gauge")
+    lines.append(f"transvideo_analysis_queue_depth {q_depth}")
+
+    return "\n".join(lines) + "\n"
+
 
 app = FastAPI(
     title="transVideo API",
@@ -52,7 +210,7 @@ app.add_middleware(
 app.include_router(upload.router)
 app.include_router(analysis.router)
 app.include_router(export.router)
-app.include_router(config.router)
+
 app.include_router(materials.router)
 
 # ── Error handlers (after routers so app-level handlers take precedence) ──
@@ -219,3 +377,18 @@ async def root() -> dict:
 async def health() -> dict:
     """Detailed health check."""
     return {"status": "healthy"}
+
+
+# ═══════════════════════════════════════════════════════════════════
+#  Prometheus /metrics
+# ═══════════════════════════════════════════════════════════════════
+
+@app.get("/metrics")
+async def metrics() -> str:
+    """Prometheus exposition-format metrics endpoint.
+
+    Returns performance metrics (latency percentiles, failure rates,
+    queue depth) in Prometheus text format.  No external Prometheus
+    client library required.
+    """
+    return _build_metrics_text()

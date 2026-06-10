@@ -11,6 +11,8 @@ import re
 from collections import Counter, defaultdict
 from typing import Any, Dict, List, Optional, Tuple
 
+from understanding.signal.composition_grid import analyze_composition_grid
+
 from understanding.pipeline_config import (
     BPM_HIGH, BPM_MEDIUM, BPM_LOW,
     BRIGHTNESS_DARK, BRIGHTNESS_BRIGHT, SATURATION_HIGH,
@@ -27,6 +29,7 @@ from understanding.pipeline_config import (
     POSITIVE_KW, NEGATIVE_KW,
     PALETTE_WARM, PALETTE_COOL,
     PALETTE_HIGH_CONTRAST, PALETTE_NEUTRAL,
+    VIDEO_TYPE_PRESETS, VIDEO_TYPE_BLEND_ALPHA,
 )
 
 
@@ -46,6 +49,7 @@ def build_detail(
     audio_data: Optional[Dict[str, Any]] = None,
     watermark_set: Optional[set] = None,
     prev_motion: Optional[Dict[str, Any]] = None,
+    video_type: str = "vlog",
 ) -> Dict[str, Any]:
     """Build per-module analysis detail from real signal data.
 
@@ -73,7 +77,7 @@ def build_detail(
         scene_tags = SCENE_TAG_MAP.get(seg_type, ["未知"])
 
     # ── Visual elements (new: returns structured dict alongside list) ──
-    vf_desc, vf_structured = derive_visual_from_features(visual_features, start, end, total_dur)
+    vf_desc, vf_structured = derive_visual_from_features(visual_features, start, end, total_dur, video_type=video_type)
 
     # OCR: collect + filter
     ocr_raw: List[str] = []
@@ -489,18 +493,16 @@ def _build_content_tags(
 # ── Visual description helpers ────────────────────────────────────────
 
 def derive_visual_from_features(
-    visual_features: Optional[List[dict]], start: float, end: float, total_dur: float
+    visual_features: Optional[List[dict]], start: float, end: float, total_dur: float,
+    video_type: str = "vlog",
 ) -> Tuple[List[str], Dict[str, Any]]:
     """Derive human-readable visual descriptions and structured data.
 
+    Args:
+        video_type: Video type preset key for portrait / motion tuning.
+
     Returns:
         (visual_list, structured_dict)
-
-        visual_list: 框架 → 内容 → 动效 human-readable labels.
-        structured_dict:
-            - brightness_curve: List[float]  normalized brightness (0-1)
-            - composition_changes: float  bbox area change rate
-            - motion_description: dict  {mean, std, max, label}
     """
     from collections import Counter, defaultdict
 
@@ -509,6 +511,13 @@ def derive_visual_from_features(
         "composition_changes": 0.0,
         "motion_description": {},
     }
+
+    # ── Load type-specific tuning params ──
+    preset = VIDEO_TYPE_PRESETS.get(video_type, VIDEO_TYPE_PRESETS["vlog"])
+    portrait_weight = preset[7] if len(preset) > 7 else 0.7
+    motion_tolerance = preset[8] if len(preset) > 8 else 1.0
+    # Scale motion thresholds: higher tolerance → lower thresholds
+    mt_scale = 1.0 / max(motion_tolerance, 0.1)
 
     if not visual_features or total_dur <= 0:
         return ["无"], structured
@@ -585,22 +594,100 @@ def derive_visual_from_features(
         if f.get("composition_type") and f["composition_type"] != "unknown"
     ]
     comp_confs = [f.get("composition_confidence", 0) for f in frames]
+
+    # Composition strategy tagged by portrait_weight
+    if portrait_weight > 0.7:
+        comp_strategy = "人像居中/三分法"
+    elif portrait_weight <= 0.3:
+        comp_strategy = "广角风光/引导线"
+    else:
+        comp_strategy = "默认构图"
+
     if comp_types:
         best_comp = Counter(comp_types).most_common(1)[0][0]
         avg_conf = sum(comp_confs) / len(comp_confs) if comp_confs else 0
-        result.append(f"构图: {best_comp}（置信度 {avg_conf:.2f}）")
+        result.append(f"构图: {best_comp}（{comp_strategy}，置信度 {avg_conf:.2f}）")
     else:
         _heuristic = ""
-        if fc >= 1 and far > FACE_CLOSEUP_RATIO:
-            _heuristic = "人物特写"
-        elif fc >= 2 and far < FACE_GROUP_RATIO:
-            _heuristic = "群像/全景"
-        elif len(all_objs) > OBJECT_COMPLEX_COUNT:
-            _heuristic = "复杂"
-        elif len(all_objs) < OBJECT_SIMPLE_COUNT:
-            _heuristic = "简洁"
+        if portrait_weight > 0.7:
+            if fc >= 1 and far > FACE_CLOSEUP_RATIO:
+                _heuristic = "人物特写"
+            elif fc >= 2:
+                _heuristic = "双人/群像"
+            elif fc == 1:
+                _heuristic = "单人特写"
+        elif portrait_weight < 0.4:
+            if len(all_objs) > OBJECT_COMPLEX_COUNT:
+                _heuristic = "复杂场景"
+            elif len(all_objs) < OBJECT_SIMPLE_COUNT:
+                _heuristic = "简洁全景"
+            else:
+                _heuristic = "场景/风光"
+        else:
+            if fc >= 1 and far > FACE_CLOSEUP_RATIO:
+                _heuristic = "人物特写"
+            elif fc >= 2 and far < FACE_GROUP_RATIO:
+                _heuristic = "群像/全景"
+            elif len(all_objs) > OBJECT_COMPLEX_COUNT:
+                _heuristic = "复杂"
+            elif len(all_objs) < OBJECT_SIMPLE_COUNT:
+                _heuristic = "简洁"
         if _heuristic:
-            result.append(f"构图: {_heuristic}构图")
+            result.append(f"构图: {_heuristic}（{comp_strategy}）")
+
+    # ══ P3: Composition grid analysis (per-frame → segment aggregation) ══
+    grid_zones: Dict[str, float] = {z: 0.0 for z in [
+        "top_left", "top", "top_right", "left", "center", "right",
+        "bottom_left", "bottom", "bottom_right",
+    ]}
+    grid_dominants: List[str] = []
+    grid_symmetries: List[str] = []
+    grid_diag_flags: List[bool] = []
+    grid_coverages: List[float] = []
+    for f in frames:
+        yolo_objs = f.get("yolo_objects", []) or []
+        fc_frame = f.get("face_count", 0)
+        if yolo_objs:
+            fw = f.get("frame_width", f.get("frame_width", 1920))
+            fh = f.get("frame_height", f.get("frame_height", 1080))
+            if fw <= 0: fw = 1920
+            if fh <= 0: fh = 1080
+            gr = analyze_composition_grid(yolo_objs, fw, fh, face_count=fc_frame)
+            grid_dominants.append(gr["grid_dominant_zone"])
+            grid_symmetries.append(gr["center_symmetry"])
+            grid_diag_flags.append(gr["diagonal_presence"])
+            grid_coverages.append(gr["subject_coverage"])
+            for zk in grid_zones:
+                grid_zones[zk] += gr["zones"].get(zk, 0.0)
+
+    n_grid = max(len(grid_dominants), 1)
+    # Normalise zone means
+    for zk in grid_zones:
+        grid_zones[zk] = round(grid_zones[zk] / n_grid, 3)
+
+    seg_dominant_zone = max(set(grid_dominants), key=grid_dominants.count) if grid_dominants else "空"
+    seg_center_symmetry = max(set(grid_symmetries), key=grid_symmetries.count) if grid_symmetries else "空"
+    seg_diagonal = sum(grid_diag_flags) / n_grid > 0.5 if grid_diag_flags else False
+    seg_coverage = round(sum(grid_coverages) / n_grid, 4) if grid_coverages else 0.0
+
+    # Append geometric info to the most recent 构图 line, or create one
+    geo_suffix_parts = []
+    if seg_dominant_zone and seg_dominant_zone != "空" and seg_dominant_zone != "center":
+        geo_suffix_parts.append(f"画面{seg_dominant_zone.replace('_', '')}")
+    if seg_diagonal:
+        geo_suffix_parts.append("对角线分布")
+    if seg_center_symmetry not in ("空", "居中"):
+        geo_suffix_parts.append(f"主体{seg_center_symmetry}")
+    geo_suffix = " · ".join(geo_suffix_parts)
+
+    if geo_suffix:
+        # Find the last 构图 line and append
+        for idx in range(len(result) - 1, -1, -1):
+            if result[idx].startswith("构图:"):
+                result[idx] = result[idx].rstrip("）") + f" · {geo_suffix}）"
+                break
+        else:
+            result.append(f"构图: {geo_suffix}")
 
     if bm < BRIGHTNESS_DARK:
         result.append("光照: 暗调/夜场景")
@@ -668,6 +755,15 @@ def derive_visual_from_features(
         result.append("物体: 无显著物体")
 
     # ═══════════════ 动效层 ═══════════════
+    # ── Motion thresholds scaled by motion_tolerance ──
+    _still = FL_STILL * mt_scale
+    _slight = FL_SLIGHT * mt_scale
+    _push = FL_PUSH * mt_scale
+    _fast = FL_FAST * mt_scale
+    _hd_still = HD_STILL * mt_scale
+    _hd_fast = HD_FAST * mt_scale
+    _hd_violent = HD_VIOLENT * mt_scale
+
     # ── Compute enriched motion signals from frame data ──
     bbox_area_trend: float = 0.0  # + = expanding, - = contracting
     brightness_trend: float = 0.0
@@ -716,7 +812,7 @@ def derive_visual_from_features(
     displacement = round(bbox_x_drift, 1) if abs(bbox_x_drift) > 2 else None
 
     # Fade detection: brightness trend (requires near-zero flow + strong brightness shift)
-    if abs(brightness_trend) > 0.25 and fl < FL_STILL:
+    if abs(brightness_trend) > 0.25 and fl < _still:
         if brightness_trend > 0:
             motion = "淡入过渡"
             motion_label_code = "FADE_IN"
@@ -725,28 +821,28 @@ def derive_visual_from_features(
             motion_label_code = "FADE_OUT"
 
     # Zoom detection: bbox area consistently expanding/contracting
-    elif bbox_area_trend > 1.25 and fl < FL_FAST:
+    elif bbox_area_trend > 1.25 and fl < _fast:
         motion = f"镜头推近（放大 ×{bbox_area_trend:.2f}）"
         motion_label_code = "ZOOM_IN"
-    elif 0.001 < bbox_area_trend < 0.75 and fl < FL_FAST:
+    elif 0.001 < bbox_area_trend < 0.75 and fl < _fast:
         zoom_ratio = max(1.0 / bbox_area_trend, 1.0)
         motion = f"镜头拉远（缩小 ×{zoom_ratio:.2f}）"
         motion_label_code = "ZOOM_OUT"
 
     # Pan detection: consistent x-drift of tracked objects
-    elif abs(bbox_x_drift) > 20 and fl < FL_FAST:
+    elif abs(bbox_x_drift) > 20 and fl < _fast:
         direction = "右移" if bbox_x_drift > 0 else "左移"
         motion = f"画面{direction}"
         motion_label_code = "PAN"
         displacement = round(bbox_x_drift, 1)
 
     # Slide detection: moderate flow + weak bbox change
-    elif FL_STILL < fl <= FL_SLIGHT and abs(bbox_area_trend - 1) < 0.15:
+    elif _still < fl <= _slight and abs(bbox_area_trend - 1) < 0.15:
         motion = "滑动平移"
         motion_label_code = "SLIDE"
 
     # Rotate heuristic: moderate flow + high std in center dispersion
-    elif FL_SLIGHT < fl <= FL_PUSH:
+    elif _slight < fl <= _push:
         # Estimate rotation from center variance (crude proxy)
         if len(bbox_centers_x) >= 2:
             spreads = [max(cs) - min(cs) for cs in bbox_centers_x if len(cs) > 1]
@@ -762,19 +858,19 @@ def derive_visual_from_features(
             motion_label_code = "PUSH"
 
     # Fallback to existing 5-level system
-    elif fl < FL_STILL and hd < HD_STILL:
+    elif fl < _still and hd < _hd_still:
         motion = "静止定镜"
         motion_label_code = "STILL"
-    elif FL_STILL <= fl <= FL_SLIGHT:
+    elif _still <= fl <= _slight:
         motion = "轻微晃动"
         motion_label_code = "SHAKE"
-    elif FL_PUSH < fl <= FL_FAST and hd < HD_FAST:
+    elif _push < fl <= _fast and hd < _hd_fast:
         motion = "快速摇镜"
         motion_label_code = "PAN"
-    elif fl > FL_FAST and hd > HD_VIOLENT:
+    elif fl > _fast and hd > _hd_violent:
         motion = "剧烈切换"
         motion_label_code = "CUT"
-    elif fl >= FL_PUSH:
+    elif fl >= _push:
         motion = "画面运动"
         motion_label_code = "MOVE"
     else:
@@ -783,7 +879,7 @@ def derive_visual_from_features(
 
     # ── Build enriched text description ──
     motion_parts = [motion]
-    if fl >= FL_STILL:
+    if fl >= _still:
         motion_parts.append(f"光流 {fl:.1f}")
     if scale_factor:
         motion_parts.append(f"缩放 ×{scale_factor}")
@@ -858,6 +954,13 @@ def derive_visual_from_features(
         "fade_in_count": fade_in_cnt,
         "fade_out_count": fade_out_cnt,
     }
+
+    # P3: segment-level grid composition
+    structured["grid_zones"] = grid_zones
+    structured["grid_dominant_zone"] = seg_dominant_zone
+    structured["center_symmetry"] = seg_center_symmetry
+    structured["diagonal_presence"] = seg_diagonal
+    structured["subject_coverage"] = seg_coverage
 
     return result, structured
 

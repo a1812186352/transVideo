@@ -1,15 +1,44 @@
 import { defineStore } from 'pinia';
-import { ref, computed } from 'vue';
+import { ref, computed, watch } from 'vue';
 import type { Module, Track, DragPayload } from '../types/script';
 
+// ═══════════════════════════════════════════════════════
+//  Auto-save: debounced localStorage persistence
+// ═══════════════════════════════════════════════════════
+
+const SAVE_KEY = 'transvideo:timeline_modules';
+
+function loadModules(): Module[] {
+  try {
+    const raw = localStorage.getItem(SAVE_KEY);
+    return raw ? JSON.parse(raw) : [];
+  } catch { return []; }
+}
+
+function saveModules(mods: Module[]) {
+  try { localStorage.setItem(SAVE_KEY, JSON.stringify(mods)); } catch { /* */ }
+}
+
+let _saveTimer: ReturnType<typeof setTimeout> | null = null;
+
+function debounceSave(mods: Module[]) {
+  if (_saveTimer) clearTimeout(_saveTimer);
+  _saveTimer = setTimeout(() => { saveModules(mods); _saveTimer = null; }, 2000);
+}
+
+// ═══════════════════════════════════════════════════════
+
 export const useTimelineStore = defineStore('timeline', () => {
-  const modules = ref<Module[]>([]);
+  const modules = ref<Module[]>(loadModules());  // ← auto-restore from localStorage
   const tracks = ref<Track[]>([
     { index: 0, name: '视频轨道', type: 'video', muted: false, locked: false },
     { index: 1, name: '文字轨道', type: 'text', muted: false, locked: false },
     { index: 2, name: '音频轨道', type: 'audio', muted: false, locked: false },
   ]);
   const selectedModuleId = ref<string | null>(null);
+
+  // ── Auto-save: debounce 2s on every modules change ──
+  watch(modules, (val) => { debounceSave(val); }, { deep: true });
 
   const selectedModule = computed(() =>
     modules.value.find((m) => m.id === selectedModuleId.value) ?? null
@@ -74,6 +103,9 @@ export const useTimelineStore = defineStore('timeline', () => {
     modules.value = list;
   }
 
-  return { modules, tracks, selectedModuleId, selectedModule, totalDuration, modulesByTrack,
-    setModules, setTracks, selectModule, addTrack, addModule, removeModule, updateModule, reorderModule };
+  return {
+    modules, tracks, selectedModuleId, selectedModule, totalDuration, modulesByTrack,
+    setModules, setTracks, selectModule, addTrack,
+    addModule, removeModule, updateModule, reorderModule,
+  };
 });

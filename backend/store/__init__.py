@@ -16,8 +16,5 @@ from backend.store.job_store import (  # noqa: F401
     STAGE_STRUCTURE,
     STAGE_SCRIPT_BUILD,
     CHECKPOINT_STAGES,
-    # ── Vision config ──
-    DEFAULT_VISION_CONFIG,
-    load_vision_config,
-    save_vision_config,
+
 )

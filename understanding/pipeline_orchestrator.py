@@ -31,9 +31,22 @@ from understanding.pipeline_config import (
     CONTENT_SAMPLE_INTERVAL_SEC,
     CONTENT_ENTROPY_THRESHOLD,
     CONTENT_EDGE_DENSITY_MAX,
+    VIDEO_TYPE_CONFIDENCE_THRESHOLD,
+    VIDEO_TYPE_PRESETS,
+    STAGE1_TASK_TIMEOUT,
+    STAGE2_TRANSCRIBE_TIMEOUT,
+    STAGE3_OCR_TIMEOUT,
+    FRAME_DIFF_SOFT_TIMEOUT,
+    SCENE_DETECT_SOFT_TIMEOUT,
+    ANALYZE_VIDEO_GLOBAL_TIMEOUT,
 )
 from understanding.pipeline_modules import build_module_tree
 from understanding.pipeline_result import assemble_result
+
+# Structured logging — used inside Pipeline
+from backend.log_config import StructuredLogger
+
+_STRUCTURED_LOG = StructuredLogger("pipeline")
 
 
 def _lazy_import(module_path: str, attr: str):
@@ -41,6 +54,65 @@ def _lazy_import(module_path: str, attr: str):
     import importlib
     mod = importlib.import_module(module_path)
     return getattr(mod, attr)
+
+
+def _pre_import_signal_deps(pipeline: Any, stage1: list) -> None:
+    """Pre-import heavy ML dependencies on the **main thread** before
+    spawning worker threads.
+
+    This avoids a class of deadlock where two threads simultaneously
+    hit ``_lazy_import`` for the same module — Python's import lock
+    can serialize them, but if one thread is already blocked on I/O
+    (e.g. cv2.VideoCapture), the other thread waiting on the import
+    lock will never wake up.
+
+    Only triggers the lazy-init on ``pipeline``; does not run any
+    actual analysis.
+    """
+    import logging
+    _log = logging.getLogger(__name__)
+
+    kinds = {k for k, _ in stage1}
+
+    if "diff" in kinds and pipeline._frame_diff is None:
+        try:
+            FrameDiffAnalyzer = _lazy_import(
+                "understanding.signal.frame_diff", "FrameDiffAnalyzer"
+            )
+            pipeline._frame_diff = FrameDiffAnalyzer()
+            _log.debug("Pre-imported FrameDiffAnalyzer on main thread")
+        except Exception:
+            _log.debug("FrameDiffAnalyzer pre-import skipped (will retry in thread)")
+
+    if "scene" in kinds and pipeline._scene_detector is None:
+        try:
+            SceneDetector = _lazy_import(
+                "understanding.signal.scene_detect", "SceneDetector"
+            )
+            pipeline._scene_detector = SceneDetector()
+            _log.debug("Pre-imported SceneDetector on main thread")
+        except Exception:
+            _log.debug("SceneDetector pre-import skipped")
+
+    if "audio" in kinds and pipeline._audio_analyzer is None:
+        try:
+            AudioAnalyzer = _lazy_import(
+                "understanding.signal.audio_analysis", "AudioAnalyzer"
+            )
+            pipeline._audio_analyzer = AudioAnalyzer()
+            _log.debug("Pre-imported AudioAnalyzer on main thread")
+        except Exception:
+            _log.debug("AudioAnalyzer pre-import skipped")
+
+    if "vad" in kinds and getattr(pipeline, '_vad_detector', None) is None:
+        try:
+            VADDetector = _lazy_import(
+                "understanding.signal.vad_detect", "VADDetector"
+            )
+            pipeline._vad_detector = VADDetector()
+            _log.debug("Pre-imported VADDetector on main thread")
+        except Exception:
+            _log.debug("VADDetector pre-import skipped")
 
 
 class Pipeline:
@@ -59,24 +131,15 @@ class Pipeline:
 
     Attributes:
         work_dir: Working directory for intermediate artifacts.
-        vision_api_url: Endpoint for multimodal LLM API.
-        vision_api_key: Authentication key for LLM API.
+
     """
 
     def __init__(
         self,
         work_dir: str = "",
-        vision_api_url: str = "",
-        vision_api_key: str = "",
-        vision_model: str = "qwen-vl-max",
-        vision_provider: str = "local",
         on_progress=None,
     ) -> None:
         self.work_dir = work_dir or os.getcwd()
-        self.vision_api_url = vision_api_url
-        self.vision_api_key = vision_api_key
-        self.vision_model = vision_model
-        self.vision_provider = vision_provider
         self.on_progress = on_progress  # callable(tag, msg) or None
 
         # Lazy-initialized components
@@ -84,15 +147,68 @@ class Pipeline:
         self._scene_detector: Optional[Any] = None
         self._transcriber: Optional[Any] = None
         self._audio_analyzer: Optional[Any] = None
+        self._vad_detector: Optional[Any] = None
         self._ocr: Optional[Any] = None
         self._frame_extractor: Optional[Any] = None
         self._sampler: Optional[AdaptiveSampler] = None
         self._structure: Optional[StructureInferrer] = None
         self._vad_detector: Optional[Any] = None
+        self._video_classifier: Optional[Any] = None
 
         # Checkpoint / resume state (lazy-initialised when video_id is set)
         self._job_store: Any = None
         self._video_id: str = ""
+        # Global timeout result (populated by _run_pipeline_body)
+        self._last_result: Optional[Dict[str, Any]] = None
+
+    # ── Resource cleanup (memory, CUDA caches) ─────────────────────
+
+    def cleanup(self) -> None:
+        """Release all lazy-loaded models and free GPU memory.
+
+        Call this after ``analyze_video()`` returns (or fails) to
+        ensure that Whisper (~1 GB), OpenCV capture states, and
+        any Torch tensors are garbage-collected promptly.
+
+        Safe to call multiple times — already-``None`` fields are
+        skipped.
+        """
+        import logging
+        _log = logging.getLogger(__name__)
+
+        # ── Release model references (allow GC to collect them) ──
+        released = False
+        for attr in (
+            "_frame_diff", "_scene_detector", "_transcriber",
+            "_audio_analyzer", "_vad_detector", "_ocr",
+            "_frame_extractor", "_sampler", "_structure",
+            "_video_classifier",
+        ):
+            obj = getattr(self, attr, None)
+            if obj is not None:
+                setattr(self, attr, None)
+                released = True
+
+        if released:
+            _log.debug("Pipeline.cleanup(): released model references")
+
+        # ── Free Torch CUDA cache ──
+        try:
+            import torch
+            if torch.cuda.is_available():
+                torch.cuda.empty_cache()
+                _log.debug("Pipeline.cleanup(): torch.cuda.empty_cache()")
+        except ImportError:
+            pass  # torch not installed — no GPU memory to manage
+
+        # ── Close JobStore connection ──
+        if self._job_store is not None:
+            try:
+                self._job_store.close()
+            except Exception:
+                pass
+            self._job_store = None
+            self._video_id = ""
 
     # ── Checkpoint helpers ─────────────────────────────────────────
 
@@ -111,6 +227,19 @@ class Pipeline:
         cp = self._job_store.get_checkpoint(self._video_id)
         return stage in cp.get("completed_stages", [])
 
+    def _heartbeat(self) -> None:
+        """Touch the heartbeat timestamp for the current job.
+
+        Called after each major stage completes so that a crash
+        between stages can be detected quickly by ``list_stale()``.
+        """
+        if self._job_store is None or not self._video_id:
+            return
+        try:
+            self._job_store.update_heartbeat(self._video_id)
+        except Exception:
+            pass
+
     def _save_artifact(self, name: str, data: Any) -> None:
         """Persist intermediate data and update checkpoint."""
         if self._job_store is None:
@@ -126,16 +255,18 @@ class Pipeline:
 
     # ── Main entry point ───────────────────────────────────────────
 
-    def analyze_video(self, video_path: str, video_id: str = "", video_type: str = "vlog") -> Dict[str, Any]:
+    def analyze_video(self, video_path: str, video_id: str, video_type: str = "vlog") -> Dict[str, Any]:
         """Run the full analysis pipeline on a video.
 
         Each major stage is wrapped in try/except — on failure the error
-        is written to the job store (if a video_id is provided) and
-        re-raised as ``AnalysisError``.
+        is written to the job store and re-raised as ``AnalysisError``.
+
+        **video_id is required** — the pipeline always uses checkpointed
+        storage so that interrupted runs can be resumed.
 
         Args:
             video_path: Absolute path to the input video file.
-            video_id: Optional job identifier for checkpointed resume.
+            video_id: Job identifier for checkpointed resume (required).
             video_type: Video type preset key (one of VIDEO_TYPE_PRESETS,
                         default "vlog" for general-purpose analysis).
 
@@ -151,15 +282,65 @@ class Pipeline:
         if not os.path.exists(video_path):
             raise FileNotFoundError(f"Video not found: {video_path}")
 
-        if video_id:
-            self._init_checkpoint(video_id)
-            if self._job_store:
-                self._job_store.set_status(video_id, "processing")
+        if not video_id:
+            import uuid
+            video_id = uuid.uuid4().hex[:16]
+            _log.warning("No video_id provided — auto-generated %s", video_id)
+
+        self._init_checkpoint(video_id)
+        if self._job_store:
+            self._job_store.create_job(
+                job_id=video_id,
+                type="analysis",
+                input_path=video_path,
+                status="processing",
+            )
+            self._job_store.update_heartbeat(video_id)
+
+        # ── Global timeout guard: run body in thread with timeout ──
+        with concurrent.futures.ThreadPoolExecutor(max_workers=1) as _timeout_exec:
+            _future = _timeout_exec.submit(
+                self._run_pipeline_body,
+                video_path, video_id, video_type, _log,
+            )
+            try:
+                _future.result(timeout=ANALYZE_VIDEO_GLOBAL_TIMEOUT)
+            except concurrent.futures.TimeoutError:
+                _log.error(
+                    "Pipeline timed out after %ds — saving partial results",
+                    ANALYZE_VIDEO_GLOBAL_TIMEOUT,
+                )
+                if self._job_store and video_id:
+                    self._job_store.set_status(video_id, "partial")
+                    self._job_store.set_error(video_id,
+                        f"Pipeline timed out after {ANALYZE_VIDEO_GLOBAL_TIMEOUT}s")
+                from backend.middleware.error_handler import AnalysisError
+                raise AnalysisError(
+                    message=f"Pipeline timed out after {ANALYZE_VIDEO_GLOBAL_TIMEOUT}s",
+                    details={"video_id": video_id, "status": "partial"},
+                    recoverable=True,
+                )
+
+        return self._last_result
+
+    def _run_pipeline_body(
+        self, video_path: str, video_id: str, video_type: str,
+        _log: logging.Logger,
+    ) -> None:
+        """Inner body of analyze_video, wrapped by global timeout."""
+        # (result stored on self._last_result for timeout path)
+        self._last_result = None
+
+        # ── Structured log with per-analysis context ──
+        slog = _STRUCTURED_LOG.child(video_id=video_id, video_type=video_type)
 
         def _fail(stage: str, exc: Exception) -> None:
             """Record error in job store and re-raise as AnalysisError."""
             msg = f"[{stage}] {exc}"
-            _log.exception("Pipeline stage '%s' failed: %s", stage, exc)
+            slog.error(
+                "Pipeline stage failed",
+                stage=stage, error=str(exc), **slog.elapsed(),
+            )
             if self._job_store and video_id:
                 self._job_store.set_error(video_id, msg)
             from backend.middleware.error_handler import AnalysisError
@@ -169,6 +350,7 @@ class Pipeline:
             ) from exc
 
         # ── Stage 1: Signal Layer (4 parallel sub-stages) ──
+        slog.info("Pipeline started", **slog.elapsed())
         try:
             signal_data = self._run_signal_layer(
                 video_path, self._video_id, self._job_store,
@@ -181,6 +363,9 @@ class Pipeline:
             scenes = len(signal_data.get("scene_boundaries", []))
             segs = len(signal_data.get("transcript_segments", []))
             self.on_progress("信号采集", f"完成 — 时长: {dur:.1f}s, 场景: {scenes}个, 语音段: {segs}个")
+        slog.info("Stage 1 complete", stage="signal_layer",
+                  duration=dur, scenes=scenes, segments=segs, **slog.elapsed())
+        self._heartbeat()
 
         # ── Stage 2: Filter Layer (keyframe sampling) ──
         try:
@@ -202,6 +387,7 @@ class Pipeline:
                     self.on_progress("帧筛选", f"完成 — {len(keyframes)} 个关键帧")
         except Exception as e:
             _fail("filter_layer", e)
+        self._heartbeat()
 
         # ── Stage 2b: Content-based sampling (second channel) ──
         try:
@@ -222,6 +408,40 @@ class Pipeline:
                     self.on_progress("帧筛选", f"内容采样 +{added} 静态帧 → 共 {len(keyframes)} 个关键帧")
         except Exception as e:
             _fail("content_sampler", e)
+        self._heartbeat()
+
+        # ── Stage 2c: Video type classification (heuristic rule-engine) ──
+        # Runs after keyframes available; may override user-specified default.
+        user_specified_type = (video_type != "vlog")
+        classifier_result = signal_data.get("video_type")
+        try:
+            if self._is_stage_done("video_type"):
+                classifier_result = self._load_checkpointed("video_type")
+                if classifier_result:
+                    signal_data["video_type"] = classifier_result
+                    if self.on_progress:
+                        self.on_progress("类型识别", f"(恢复) {classifier_result.get('video_type', 'vlog')}")
+            else:
+                classifier_result = self._run_video_classifier(keyframes, signal_data=signal_data)
+                if classifier_result:
+                    signal_data["video_type"] = classifier_result
+                    if self._job_store:
+                        self._save_artifact("video_type", classifier_result)
+                    if self.on_progress:
+                        self.on_progress("类型识别",
+                            f"{classifier_result.get('video_type', '?')} "
+                            f"(置信度 {classifier_result.get('confidence', 0):.2f}, "
+                            f"method={classifier_result.get('method', '?')})")
+        except Exception:
+            _log.warning("Video type classification failed — keeping default")
+
+        # Override video_type if user didn't specify and classifier is confident
+        if not user_specified_type and classifier_result:
+            cls_type = classifier_result.get("video_type", "vlog")
+            cls_conf = classifier_result.get("confidence", 0.0)
+            if cls_conf > VIDEO_TYPE_CONFIDENCE_THRESHOLD and cls_type in VIDEO_TYPE_PRESETS:
+                video_type = cls_type
+                _log.info("Video type auto-classified as '%s' (confidence=%.2f)", video_type, cls_conf)
 
         # ── Stage 2.5: OCR on keyframes ──
         try:
@@ -237,8 +457,11 @@ class Pipeline:
                     self._save_artifact("ocr_keyframes", ocr_results)
                 if self.on_progress:
                     self.on_progress("文字识别", f"完成 — {len(ocr_results)} 帧")
+            slog.info("Stage 2.5 complete", stage="ocr",
+                      frames=len(ocr_results), **slog.elapsed())
         except Exception as e:
             _fail("ocr", e)
+        self._heartbeat()
 
         # ── Stage 3: Understand Layer ──
         try:
@@ -261,8 +484,11 @@ class Pipeline:
                     self._save_artifact("structure", structure_segments)
                 if self.on_progress:
                     self.on_progress("规则引擎", f"完成 — {len(structure_segments)} 个叙事段")
+            slog.info("Stage 3 complete", stage="understand_layer",
+                      segments=len(structure_segments), **slog.elapsed())
         except Exception as e:
             _fail("understand_layer", e)
+        self._heartbeat()
 
         # ── Stage 4: Build Module Tree ──
         try:
@@ -292,14 +518,18 @@ class Pipeline:
                     self._save_artifact("script_build", module_tree)
                 if self.on_progress:
                     self.on_progress("Pipeline", f"模块树生成完成 — {len(module_tree)} 个模块")
+            slog.info("Stage 4 complete", stage="module_tree",
+                      modules=len(module_tree), **slog.elapsed())
+            slog.info("Pipeline complete", **slog.elapsed())
         except Exception as e:
             _fail("module_tree", e)
+        self._heartbeat()
 
         # Mark completed in job store
         if self._job_store and video_id:
             self._job_store.set_status(video_id, "completed")
 
-        return assemble_result(
+        self._last_result = assemble_result(
             signal_data=signal_data,
             keyframes=keyframes,
             structure_segments=structure_segments,
@@ -442,14 +672,56 @@ class Pipeline:
             stage1.append(("vad", _vad_detect))
 
         if stage1:
-            with concurrent.futures.ThreadPoolExecutor(max_workers=4) as pool:
-                future_map = {pool.submit(fn): kind for kind, fn in stage1}
-                for f in concurrent.futures.as_completed(future_map):
-                    kind = future_map[f]
-                    r = f.result()
-                    if r is None:
-                        continue
-                    self._merge_signal_result(results, kind, r[1] if len(r) > 1 else None, r)
+            # ── Pre-import heavy deps on main thread to avoid Python
+            #     import-lock deadlock when two threads hit _lazy_import
+            #     simultaneously for the same module.
+            _pre_import_signal_deps(self, stage1)
+
+            # ── OpenCV-based tasks (frame_diff + scene_detect) must run
+            #     sequentially — they both open the SAME video file via
+            #     cv2.VideoCapture, and concurrent access can deadlock at
+            #     the kernel / driver level.
+            opencv_kinds = {"diff", "scene"}
+            opencv_tasks = [(k, f) for k, f in stage1 if k in opencv_kinds]
+            other_tasks  = [(k, f) for k, f in stage1 if k not in opencv_kinds]
+
+            # ── Run OpenCV tasks sequentially with individual timeouts ──
+            for kind, fn in opencv_tasks:
+                timeout = FRAME_DIFF_SOFT_TIMEOUT if kind == "diff" else SCENE_DETECT_SOFT_TIMEOUT
+                task_label = "frame_diff" if kind == "diff" else "scene_detect"
+                try:
+                    with concurrent.futures.ThreadPoolExecutor(max_workers=1) as pool:
+                        f = pool.submit(fn)
+                        r = f.result(timeout=timeout)
+                        if r is not None:
+                            self._merge_signal_result(results, kind, r[1] if len(r) > 1 else None, r)
+                except concurrent.futures.TimeoutError:
+                    _log.error("%s timed out after %ds — skipping", task_label, timeout)
+                except Exception:
+                    _log.exception("%s crashed — skipping", task_label)
+
+            # ── Run non-OpenCV tasks in parallel with per-task timeout ──
+            if other_tasks:
+                with concurrent.futures.ThreadPoolExecutor(max_workers=4) as pool:
+                    future_map: dict = {}
+                    for kind, fn in other_tasks:
+                        future_map[pool.submit(fn)] = kind
+
+                    for f in concurrent.futures.as_completed(future_map):
+                        kind = future_map[f]
+                        task_label = {"audio": "audio_analysis", "vad": "vad_detect"}.get(kind, kind)
+                        try:
+                            r = f.result(timeout=STAGE1_TASK_TIMEOUT)
+                            if r is None:
+                                continue
+                            self._merge_signal_result(results, kind, r[1] if len(r) > 1 else None, r)
+                        except concurrent.futures.TimeoutError:
+                            _log.error("%s timed out after %ds — skipping", task_label, STAGE1_TASK_TIMEOUT)
+                        except Exception:
+                            _log.exception("%s crashed — skipping", task_label)
+
+                # Heartbeat after each completed parallel sub-task
+                self._heartbeat()
 
             # Persist stage-1 artifacts
             if job_store:
@@ -481,9 +753,15 @@ class Pipeline:
         if need_transcribe and vad_has_speech:
             with concurrent.futures.ThreadPoolExecutor(max_workers=1) as pool:
                 f = pool.submit(_transcribe)
-                r = f.result()
-                if r is not None:
-                    self._merge_signal_result(results, "transcript", r[1] if len(r) > 1 else None, r)
+                try:
+                    r = f.result(timeout=STAGE2_TRANSCRIBE_TIMEOUT)
+                    if r is not None:
+                        self._merge_signal_result(results, "transcript", r[1] if len(r) > 1 else None, r)
+                except concurrent.futures.TimeoutError:
+                    _log.error(
+                        "Whisper transcription timed out after %ds — skipping",
+                        STAGE2_TRANSCRIBE_TIMEOUT,
+                    )
                 # Persist transcription
                 if job_store and results.get("transcript_segments"):
                     job_store.save_artifact(video_id, "audio_transcribe", {
@@ -573,6 +851,66 @@ class Pipeline:
             _log.debug("Content sampler skipped (load error)", exc_info=True)
             return []
 
+    # ── Video Type Classification ──────────────────────────────────
+
+    def _run_video_classifier(
+        self,
+        keyframes: List[dict],
+        signal_data: Dict[str, Any],
+    ) -> Optional[Dict[str, Any]]:
+        """Run heuristic video-type classifier (pure rules, zero ML deps).
+
+        Builds a signal summary from keyframe data and signal_data, then
+        passes it to the heuristic rule-engine.
+        """
+        if not keyframes:
+            return None
+
+        try:
+            if self._video_classifier is None:
+                create_classifier = _lazy_import(
+                    "understanding.signal.video_classifier", "create_classifier",
+                )
+                self._video_classifier = create_classifier()
+
+            # ── Build signal summary from keyframe + signal_data ──
+            n = len(keyframes)
+            fc = sum(k.get("face_count", 0) for k in keyframes) / max(n, 1)
+            flows = [k.get("optical_flow_magnitude", 0) for k in keyframes if isinstance(k, dict)]
+            flows_val = sum(flows) / max(len(flows), 1)
+            edges = [k.get("edge_density", 0) for k in keyframes if isinstance(k, dict)]
+            edges_val = sum(edges) / max(len(edges), 1)
+
+            # Enrich with audio / visual data from signal_data
+            audio = signal_data.get("audio_data", {})
+            bgm_type = audio.get("bgm_type", "") or audio.get("mood", "") or ""
+            bpm = audio.get("bpm", 0) or 0
+
+            # is_dominantly_neutral from visual_features if available
+            vf_all = signal_data.get("visual_features", [])
+            neutral_count = 0
+            for vf in vf_all:
+                if isinstance(vf, dict):
+                    if vf.get("is_dominantly_neutral", False):
+                        neutral_count += 1
+            is_neutral = (neutral_count / max(len(vf_all), 1)) > 0.5 if vf_all else False
+
+            sig: Dict[str, Any] = {
+                "face_count_avg": round(fc, 3),
+                "optical_flow_avg": round(flows_val, 2),
+                "edge_density_avg": round(edges_val, 4),
+                "bgm_type": bgm_type,
+                "bpm": bpm,
+                "is_dominantly_neutral": is_neutral,
+            }
+
+            return self._video_classifier.classify(signal_summary=sig)
+        except Exception:
+            logging.getLogger(__name__).debug(
+                "Video classifier skipped", exc_info=True,
+            )
+            return None
+
     def _run_ocr_on_keyframes(
         self,
         video_path: str,
@@ -603,18 +941,36 @@ class Pipeline:
             if not frame_paths:
                 return []
 
+            # ── OCR batches with per-batch checkpoint ──
             ocr_results: List[dict] = []
+            n_batches = (len(frame_paths) + OCR_BATCH_SIZE - 1) // OCR_BATCH_SIZE
             with concurrent.futures.ThreadPoolExecutor(max_workers=OCR_MAX_WORKERS) as pool:
                 batches = [
                     frame_paths[i:i + OCR_BATCH_SIZE]
                     for i in range(0, len(frame_paths), OCR_BATCH_SIZE)
                 ]
-                futures = [pool.submit(self._ocr.extract, b) for b in batches]
+                futures = {pool.submit(self._ocr.extract, b) for b in batches}
+                completed_batches = 0
                 for f in concurrent.futures.as_completed(futures):
                     try:
-                        ocr_results.extend(f.result())
+                        ocr_results.extend(f.result(timeout=STAGE3_OCR_TIMEOUT))
+                    except concurrent.futures.TimeoutError:
+                        _log.warning("OCR batch timed out after %ds — skipping", STAGE3_OCR_TIMEOUT)
                     except Exception:
                         pass
+                    # ── Sub-stage checkpoint: save progress after each batch ──
+                    completed_batches += 1
+                    if self._job_store and self._video_id:
+                        self._job_store.update_heartbeat(self._video_id)
+                        self._job_store.save_artifact(
+                            self._video_id,
+                            "ocr_progress",
+                            {
+                                "completed_batches": completed_batches,
+                                "total_batches": n_batches,
+                                "result_count": len(ocr_results),
+                            },
+                        )
 
             # Inject real timestamps from keyframe data
             ts_map = {kf["frame_index"]: kf.get("timestamp", 0.0) for kf in keyframes}
@@ -643,9 +999,8 @@ class Pipeline:
         """Run vision analysis, visual features, and structure inference.
 
         Degradation chain:
-          1. External vision API (if provider="api" and api_url set)
-          2. Local YOLO + OpenCV
-          3. OpenCV-only (zero-model)
+          1. Local YOLO + OpenCV
+          2. OpenCV-only (zero-model)
         """
         import logging
         _log = logging.getLogger(__name__)
@@ -682,13 +1037,7 @@ class Pipeline:
                 "understanding.signal.visual_features", "VisualFeatureExtractor"
             )
             vfe = VisualFeatureExtractor()
-            vfe.set_provider(
-                provider=self.vision_provider or "local",
-                api_url=self.vision_api_url,
-                api_key=self.vision_api_key,
-                model=self.vision_model,
-            )
-            result = vfe.analyze_frames(extracted_paths)
+            result = {"features": vfe.extract_batch(extracted_paths)}
             visual_features = result.get("features", [])
             frame_descriptions = result.get("descriptions", [])
             source = result.get("source", "opencv")

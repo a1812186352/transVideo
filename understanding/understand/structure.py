@@ -116,7 +116,7 @@ class StructureInferrer:
 
         # ── Apply preset (override default thresholds) ──
         if preset is not None:
-            opening_pct, closing_pct, energy_mult, cut_mult, ocr_w, audio_w, yolo_w = preset
+            opening_pct, closing_pct, energy_mult, cut_mult, ocr_w, audio_w, yolo_w = preset[:7]
         else:
             opening_pct = self.OPENING_POSITION
             closing_pct = self.CLOSING_POSITION

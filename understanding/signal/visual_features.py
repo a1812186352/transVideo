@@ -17,15 +17,11 @@ Extracts多路 orthogonal features from video keyframes:
 
 from __future__ import annotations
 
-import base64
 import logging
-import mimetypes
-import time
 from collections import Counter
 from typing import Any, Dict, List, Optional, Tuple
 
 import cv2
-import httpx
 import numpy as np
 
 logger = logging.getLogger(__name__)
@@ -76,172 +72,11 @@ class VisualFeatureExtractor:
         self._yolo_device: str = ""
         self._yolo_failed = False
 
-        # Provider config (set by set_provider before analysis)
-        self._provider: str = "local"  # "local" | "api"
-        self._api_url: str = ""
-        self._api_key: str = ""
-        self._api_model: str = "qwen-vl-max"
 
-    def set_provider(
-        self, provider: str = "local",
-        api_url: str = "", api_key: str = "", model: str = "qwen-vl-max",
-    ) -> None:
-        """Configure which provider to use for frame understanding.
 
-        Args:
-            provider: "local" (YOLO + OpenCV) or "api" (external multimodal LLM).
-            api_url: Endpoint URL for external vision API.
-            api_key: Authentication key.
-            model: Model name (e.g. "qwen-vl-max", "gpt-4o").
-        """
-        self._provider = provider
-        self._api_url = api_url
-        self._api_key = api_key
-        self._api_model = model or "qwen-vl-max"
 
-    def analyze_frames(
-        self, frame_paths: List[str]
-    ) -> Dict[str, Any]:
-        """Run the full degradation chain: API → YOLO → OpenCV-only.
 
-        Returns:
-            dict with keys:
-              - source: "api" | "yolo" | "opencv"
-              - descriptions: List[dict] (per-frame, only for API)
-              - features: List[dict] (visual_features format, always)
-              - api_time: float or 0
-        """
-        result: Dict[str, Any] = {
-            "source": "opencv",
-            "descriptions": [],
-            "features": [],
-            "api_time": 0.0,
-        }
 
-        # Level 1: External API
-        if self._provider == "api" and self._api_url:
-            try:
-                t0 = time.time()
-                descriptions, api_features = self._analyze_with_api(frame_paths)
-                api_elapsed = time.time() - t0
-                if descriptions:
-                    result["source"] = "api"
-                    result["descriptions"] = descriptions
-                    result["features"] = api_features
-                    result["api_time"] = round(api_elapsed, 2)
-                    return result
-            except Exception as exc:
-                logger.warning("External vision API failed (%s), falling back to YOLO…", exc)
-
-        # Level 2: YOLO + OpenCV
-        try:
-            yolo_ok = self._load_yolo() is not None
-            if yolo_ok:
-                features = self.extract_batch(frame_paths)
-                non_zero = sum(1 for f in features if f.get("yolo_total_objects", 0) > 0 or f.get("face_count", 0) > 0)
-                if non_zero > 0:
-                    result["source"] = "yolo"
-                    result["features"] = features
-                    return result
-        except Exception as exc:
-            logger.warning("YOLO inference failed (%s), falling back to OpenCV…", exc)
-
-        # Level 3: OpenCV-only (zero-model)
-        try:
-            features = self.extract_batch(frame_paths)
-            result["source"] = "opencv"
-            result["features"] = features
-        except Exception as exc:
-            logger.warning("OpenCV feature extraction failed: %s", exc)
-
-        return result
-
-    def _analyze_with_api(self, frame_paths: List[str]) -> Tuple[List[dict], List[dict]]:
-        """Call external multimodal LLM API for frame descriptions.
-
-        Returns (descriptions, features_with_api_tags).
-        """
-        descriptions: List[dict] = []
-        api_features: List[dict] = []
-
-        batch_size = 5
-        for i in range(0, len(frame_paths), batch_size):
-            batch = frame_paths[i:i + batch_size]
-            batch_desc, batch_feat = self._call_vision_api(batch)
-            descriptions.extend(batch_desc)
-            api_features.extend(batch_feat)
-
-        return descriptions, api_features
-
-    def _call_vision_api(self, frame_paths: List[str]) -> Tuple[List[dict], List[dict]]:
-        """Single batch call to multimodal LLM API.
-
-        Uses OpenAI-compatible chat completions endpoint.
-        """
-        import os as _os
-
-        # Encode frames as base64 data URIs
-        content_parts = [{"type": "text", "text": (
-            "Describe this video frame briefly in Chinese: "
-            "what is shown, who is present, visible text, camera framing. "
-            "Output as JSON: {\"description\":\"…\",\"objects\":[\"…\"],\"scene_type\":\"…\"}"
-        )}]
-
-        for path in frame_paths:
-            mime = mimetypes.guess_type(path)[0] or "image/jpeg"
-            with open(path, "rb") as f:
-                b64 = base64.b64encode(f.read()).decode("utf-8")
-            content_parts.append({
-                "type": "image_url",
-                "image_url": {"url": f"data:{mime};base64,{b64}"},
-            })
-
-        headers = {"Content-Type": "application/json"}
-        if self._api_key:
-            headers["Authorization"] = f"Bearer {self._api_key}"
-
-        payload = {
-            "model": self._api_model,
-            "messages": [{"role": "user", "content": content_parts}],
-            "max_tokens": 1024,
-        }
-
-        # 5s timeout per batch
-        resp = httpx.post(
-            self._api_url, json=payload, headers=headers,
-            timeout=httpx.Timeout(5.0, connect=3.0),
-        )
-        resp.raise_for_status()
-        data = resp.json()
-
-        desc_text = ""
-        try:
-            desc_text = data["choices"][0]["message"]["content"]
-        except (KeyError, IndexError, TypeError):
-            desc_text = str(data)
-
-        # One description per frame
-        result_descriptions: List[dict] = []
-        result_features: List[dict] = []
-        for path in frame_paths:
-            fidx = int(_os.path.basename(path).replace("frame_", "").replace(".png", ""))
-            result_descriptions.append({
-                "frame_path": path,
-                "description": desc_text[:200],
-                "detected_objects": [],
-                "scene_type": "api_analyzed",
-            })
-            result_features.append({
-                "frame_path": path, "frame_index": fidx,
-                "face_count": 0, "face_area_ratio": 0.0,
-                "brightness_mean": 0.0, "brightness_std": 0.0,
-                "saturation_mean": 0.0, "edge_density": 0.0,
-                "gray_entropy": 0.0,
-                "optical_flow_magnitude": 0.0, "histogram_distance": 0.0,
-                "_api_description": desc_text[:120],
-            })
-
-        return result_descriptions, result_features
 
     # ── Public API ──
 
@@ -311,6 +146,9 @@ class VisualFeatureExtractor:
             "dominant_color_zone": color_stats["dominant"],
             "is_dominantly_neutral": color_stats["is_neutral"],
             "avg_hue": color_stats["avg_hue"],
+            # Frame geometry (for downstream grid analysis)
+            "frame_width": w,
+            "frame_height": h,
         }
 
     def extract_pair(self, prev_path: str, curr_path: str) -> dict:
@@ -957,6 +795,8 @@ def _zero_features(frame_path: str, index: int) -> dict:
         "yolo_total_objects": 0,
         "yolo_quality_flag": "reliable",
         "composition_type": "unknown",
+        "frame_width": 0,
+        "frame_height": 0,
         "composition_confidence": 0.0,
         "color_zone_pcts": {"白色/浅灰": 0.0, "暗色": 0.0, "暖色": 0.0, "冷色": 0.0, "中性": 0.0},
         "dominant_color_zone": "中性",

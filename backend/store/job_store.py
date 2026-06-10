@@ -64,53 +64,7 @@ PROGRESS_THROTTLE_SEC = 2.0
 
 DEFAULT_CLEANUP_AGE_HOURS = 24
 
-# ── VisionConfig: persisted vision provider settings ──
 
-DEFAULT_VISION_CONFIG: Dict[str, Any] = {
-    "provider": "local",
-    "api_url": "",
-    "api_key": "",
-    "model": "qwen-vl-max",
-}
-
-_VISION_CONFIG_PATH: str = ""
-
-
-def _ensure_config_path(base_dir: str = "") -> str:
-    global _VISION_CONFIG_PATH
-    if not _VISION_CONFIG_PATH:
-        _VISION_CONFIG_PATH = os.path.join(
-            base_dir or os.getcwd(), "job_store", "vision_config.json"
-        )
-    return _VISION_CONFIG_PATH
-
-
-def load_vision_config(base_dir: str = "") -> Dict[str, Any]:
-    """Load vision config from disk, falling back to defaults."""
-    path = _ensure_config_path(base_dir)
-    try:
-        if os.path.exists(path):
-            with open(path, "r", encoding="utf-8") as f:
-                data: dict = json.load(f)
-                merged = dict(DEFAULT_VISION_CONFIG)
-                merged.update(data)
-                return merged
-    except (json.JSONDecodeError, OSError):
-        pass
-    return dict(DEFAULT_VISION_CONFIG)
-
-
-def save_vision_config(config: Dict[str, Any], base_dir: str = "") -> Dict[str, Any]:
-    """Validate and persist vision config to disk."""
-    merged = dict(DEFAULT_VISION_CONFIG)
-    merged.update(config)
-    if merged["provider"] not in ("local", "api"):
-        merged["provider"] = "local"
-    path = _ensure_config_path(base_dir)
-    os.makedirs(os.path.dirname(path), exist_ok=True)
-    with open(path, "w", encoding="utf-8") as f:
-        json.dump(merged, f, indent=2, ensure_ascii=False)
-    return merged
 
 
 # ═══════════════════════════════════════════════════════════════════
@@ -126,6 +80,7 @@ CREATE TABLE IF NOT EXISTS jobs (
     progress    REAL NOT NULL DEFAULT 0.0,
     result      TEXT NOT NULL DEFAULT '{}',
     error       TEXT,
+    heartbeat_at TEXT,
     created_at  TEXT NOT NULL DEFAULT (datetime('now')),
     updated_at  TEXT NOT NULL DEFAULT (datetime('now'))
 );
@@ -133,7 +88,12 @@ CREATE TABLE IF NOT EXISTS jobs (
 CREATE INDEX IF NOT EXISTS idx_jobs_status ON jobs(status);
 CREATE INDEX IF NOT EXISTS idx_jobs_type ON jobs(type);
 CREATE INDEX IF NOT EXISTS idx_jobs_updated ON jobs(updated_at);
+CREATE INDEX IF NOT EXISTS idx_jobs_heartbeat ON jobs(heartbeat_at);
 """
+
+# ── Heartbeat decay (seconds) — a job whose heartbeat is older than
+#     this threshold is considered stale regardless of status.
+HEARTBEAT_STALE_SEC = 90.0
 
 # ── Old schema (for auto-migration) ──
 
@@ -202,7 +162,10 @@ class JobStore:
         self._migrate_json_files()
 
     def _init_schema(self) -> None:
-        """Create new schema; if old schema detected, migrate in-place."""
+        """Create new schema; if old schema detected, migrate in-place.
+
+        Also adds missing columns on existing DBs (e.g. heartbeat_at).
+        """
         # Check if jobs table already exists
         existing = self._conn.execute(
             "SELECT name FROM sqlite_master WHERE type='table' AND name='jobs'"
@@ -222,6 +185,15 @@ class JobStore:
             self._conn.execute("DROP TABLE IF EXISTS jobs")
             self._conn.execute("DROP TABLE IF EXISTS job_data")
             self._conn.executescript(_NEW_SCHEMA)
+
+        # ── Add missing columns (safe to repeat) ──
+        if not _table_has_column(self._conn, "jobs", "heartbeat_at"):
+            try:
+                self._conn.execute(
+                    "ALTER TABLE jobs ADD COLUMN heartbeat_at TEXT"
+                )
+            except sqlite3.OperationalError:
+                pass  # column already exists (race)
 
     def _migrate_old_schema(self) -> None:
         """Migrate from old two-table schema to new single-table schema.
@@ -497,12 +469,30 @@ class JobStore:
             ).fetchall()
             return [self._row_to_dict(r) for r in rows]
 
+    def update_heartbeat(self, job_id: str) -> None:
+        """Touch the heartbeat timestamp for a running job.
+
+        Should be called periodically (every 15-30 s) during long-running
+        tasks so that ``list_stale()`` can distinguish "running" from
+        "crashed".
+        """
+        with self._lock:
+            self._conn.execute(
+                "UPDATE jobs SET heartbeat_at = datetime('now') WHERE id = ?",
+                (job_id,),
+            )
+
     def list_stale(self) -> List[Dict[str, Any]]:
         """Return jobs that may need recovery after a process restart.
 
-        A job is stale when its status is in ``STALE_STATUSES``
-        (``pending`` / ``processing`` / ``queued``) — these were
-        not completed before the last shutdown.
+        A job is stale when:
+        - Its status is in ``STALE_STATUSES`` (``pending`` / ``processing`` /
+          ``queued``) **AND** either:
+          - ``heartbeat_at`` is ``NULL`` (never beat — legacy),
+          - ``heartbeat_at`` is older than ``HEARTBEAT_STALE_SEC`` (90 s).
+
+        This prevents false-positives on genuinely running jobs that
+        just haven't written a terminal status yet.
 
         Each returned dict includes an extra ``stale_age_seconds``
         field (time since ``updated_at``).
@@ -510,8 +500,11 @@ class JobStore:
         now_ts = time.time()
         placeholders = ",".join("?" * len(STALE_STATUSES))
         with self._lock:
+            # Jobs in stale status AND (heartbeat is NULL OR heartbeat is expired)
             rows = self._conn.execute(
                 f"SELECT * FROM jobs WHERE status IN ({placeholders}) "
+                "AND (heartbeat_at IS NULL OR "
+                f"  strftime('%%s','now') - strftime('%%s', heartbeat_at) > {int(HEARTBEAT_STALE_SEC)}) "
                 "ORDER BY updated_at ASC",
                 list(STALE_STATUSES),
             ).fetchall()
@@ -521,9 +514,7 @@ class JobStore:
                 # Compute stale age from updated_at (stored in UTC)
                 try:
                     updated = r["updated_at"]
-                    # SQLite datetime format: "YYYY-MM-DD HH:MM:SS" (UTC)
                     parsed = time.strptime(updated, "%Y-%m-%d %H:%M:%S")
-                    # Use calendar.timegm for UTC → epoch seconds
                     import calendar
                     updated_epoch = calendar.timegm(parsed)
                     d["stale_age_seconds"] = round(now_ts - updated_epoch, 1)
@@ -560,6 +551,23 @@ class JobStore:
                 "SELECT status, COUNT(*) AS cnt FROM jobs GROUP BY status"
             ).fetchall()
             return {r["status"]: r["cnt"] for r in rows}
+
+    def list_active(self) -> List[Dict[str, Any]]:
+        """Return jobs that are running and have a recent heartbeat.
+
+        These are truly live jobs (status processing/queued + heartbeat
+        within ``HEARTBEAT_STALE_SEC``) — not stale, not dead.
+        """
+        placeholders = ",".join("?" * len(STALE_STATUSES))
+        with self._lock:
+            rows = self._conn.execute(
+                f"SELECT * FROM jobs WHERE status IN ({placeholders}) "
+                "AND heartbeat_at IS NOT NULL "
+                f"AND strftime('%%s','now') - strftime('%%s', heartbeat_at) <= {int(HEARTBEAT_STALE_SEC)} "
+                "ORDER BY heartbeat_at DESC",
+                list(STALE_STATUSES),
+            ).fetchall()
+            return [self._row_to_dict(r) for r in rows]
 
     def cleanup_old(self, max_age_hours: float = DEFAULT_CLEANUP_AGE_HOURS) -> int:
         """Delete jobs older than *max_age_hours* and their temp files.

@@ -75,6 +75,7 @@ async def _run_export(video_id: str, script: MigratableScript) -> None:
 
         _export_jobs.set_status(video_id, "processing")
         _export_jobs.update_progress(video_id, 0.0)
+        _export_jobs.update_heartbeat(video_id)
         _push_progress(video_id, 0, "初始化渲染引擎", eta)
 
         from generation import get_engine
@@ -86,12 +87,33 @@ async def _run_export(video_id: str, script: MigratableScript) -> None:
             crf=23,
         )
 
+        # ── Count modules for progress-based checkpoint ──
+        modules_list = script_data.get("modules", [])
+        module_count = max(len(modules_list), 1)
+
         def _progress(pct: int, stage: str, eta_sec: int) -> None:
             _export_jobs.update_progress(video_id, pct / 100.0)
+            _export_jobs.update_heartbeat(video_id)
             _push_progress(video_id, pct, stage, eta_sec if eta_sec else eta)
             # Check cancel flag at each progress tick
             if _cancel_flags.get(video_id, False):
                 raise RuntimeError("Canceled by user")
+
+            # ── Module-level checkpoint ──
+            # Estimate current module index from progress percentage.
+            # The render engine processes modules sequentially, so
+            # module_idx ≈ floor(pct / 100 * N).
+            current_module = min(int(pct / 100.0 * module_count), module_count - 1)
+            _export_jobs.save_artifact(
+                video_id,
+                "export_checkpoint",
+                {
+                    "completed_modules": current_module,
+                    "total_modules": module_count,
+                    "progress_pct": pct,
+                    "stage": stage,
+                },
+            )
 
         # ── Render ──
         result_path = await engine.render(
@@ -100,6 +122,14 @@ async def _run_export(video_id: str, script: MigratableScript) -> None:
             progress_callback=_progress,
             timeout=1800,  # 30 min default
         )
+
+        # ── Clear checkpoint on success ──
+        _export_jobs.save_artifact(video_id, "export_checkpoint", {
+            "completed_modules": module_count,
+            "total_modules": module_count,
+            "progress_pct": 100,
+            "stage": "渲染完成",
+        })
 
         filename = os.path.basename(result_path)
         _export_jobs.set_result(video_id, {

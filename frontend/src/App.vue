@@ -3,7 +3,11 @@
 </template>
 
 <script setup lang="ts">
+import { useKeyboardShortcuts } from './composables/keyboardShortcuts';
 import Workbench from './views/Workbench.vue';
+
+// ── 全局键盘快捷键 ──
+useKeyboardShortcuts();
 </script>
 
 <style>
