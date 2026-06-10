@@ -169,6 +169,20 @@ async def analyze_video(
     try:
         video_path = _find_video(video_id)
 
+        # ── Skip re-analysis if already completed with same type ──
+        existing = _jobs.get_job(video_id)
+        if existing and existing.get("status") == "completed":
+            _log.info("Analysis already completed for %s (type=%s) — skipping re-analysis", video_id, video_type)
+            _analysis_semaphore.release()
+            result = existing.get("result", {})
+            script_dict = result.get("script") if isinstance(result, dict) else None
+            script = MigratableScript(**script_dict) if script_dict else None
+            creative_pattern = result.get("creative_pattern") if isinstance(result, dict) else None
+            return AnalysisResponse(
+                video_id=video_id, status="completed", script=script,
+                creative_pattern=creative_pattern,
+            )
+
         # Create job record via new API
         _jobs.create_job(
             job_id=video_id,

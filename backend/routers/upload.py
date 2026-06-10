@@ -6,9 +6,9 @@ and cleans up partial files on upload interruption.
 
 import asyncio
 import base64
+import hashlib
 import logging
 import os
-import uuid
 from typing import Dict, List, Optional, Set
 
 import aiofiles
@@ -196,8 +196,9 @@ async def upload_video(request: Request, file: UploadFile = File(...)) -> Upload
                 },
             )
 
-        # ── Generate unique video_id ──
-        video_id = uuid.uuid4().hex[:16]
+        # ── Generate deterministic video_id from content hash ──
+        # Same file content → same video_id → skip re-analysis
+        video_id = hashlib.sha256(content).hexdigest()[:16]
 
         # ── Ensure upload directory exists ──
         os.makedirs(UPLOAD_DIR, exist_ok=True)

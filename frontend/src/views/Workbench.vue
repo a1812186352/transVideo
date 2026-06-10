@@ -156,24 +156,28 @@
             </div>
           </div>
 
-          <!-- 生成预览（下方，自适应） — 模板蓝图优先，降级到硬编码 -->          <div class="mg-panel mg-panel--preview">
+          <!-- 生成蓝图 -->
+          <div class="mg-panel mg-panel--preview">
             <div class="mg-panel__header">
-              <span>{{ blueprint ? '生成蓝图' : '生成预览' }}</span>
+              <span>生成蓝图</span>
               <span v-if="blueprintLoading" class="mg-panel__badge">加载中…</span>
               <span v-else-if="blueprint" class="mg-panel__badge">
-                {{ blueprint?.template?.label || '—' }} · {{ blueprint?.summary?.block_count ?? 0 }} 模块
+                {{ blueprint.template.label }} · {{ blueprint.summary.block_count }} 模块
               </span>
-              <span v-else class="mg-panel__badge" :class="{ 'mg-panel__badge--danger': gapCount > 0 }">
-                {{ gapCount > 0 ? `${gapCount} 缺口` : '素材充足' }}
-              </span>
+              <span v-else class="mg-panel__badge">等待迁移</span>
               <button class="mg-panel__export-btn" @click="ws.handleExport">导出视频</button>
             </div>
             <div class="mg-panel__body">
-              <!-- Blueprint timeline blocks -->
               <div v-if="blueprint" class="blueprint-track">
-                <div v-for="(b, i) in blueprint.blocks" :key="i" class="blueprint-block"
-                     :class="'blueprint-block--' + b.status"
-                     :style="{ flex: b.duration || 1 }">
+                <div v-for="(b, i) in blueprint.blocks" :key="i"
+                     class="blueprint-block" :class="'blueprint-block--' + b.status"
+                     :style="{ flex: b.duration || 1 }"
+                     draggable="true"
+                     @dragstart="onBlueprintDragStart(i, $event)"
+                     @dragover.prevent="onBlueprintDragOver(i, $event)"
+                     @dragend="onBlueprintDragEnd"
+                     @drop.prevent="onBlueprintDrop(i, $event)">
+                  <span class="blueprint-block__drag" title="拖拽调整顺序">⠿</span>
                   <span class="blueprint-block__name">{{ b.name }}</span>
                   <span class="blueprint-block__time">{{ formatBlockTime(b) }}</span>
                   <span class="blueprint-block__badge">{{ statusLabelBP(b.status) }}</span>
@@ -183,13 +187,7 @@
                 </div>
               </div>
               <div v-else-if="blueprintLoading" class="gen-preview-placeholder">生成蓝图中…</div>
-              <div v-else>
-                <GenerationPreview
-                  :slots="genSlotsDynamic"
-                  @remove-slot="onRemoveGenSlot"
-                  @fill-slot="onFillGenSlot"
-                />
-              </div>
+              <div v-else class="gen-preview-placeholder">选择模板后点击「结构迁移」生成蓝图</div>
             </div>
           </div>
         </section>
@@ -204,6 +202,11 @@
         />
       </footer>
     </template>
+
+    <!-- ═══ Toast notification ═══ -->
+    <Teleport to="body">
+      <div v-if="toastMsg" class="toast">{{ toastMsg }}</div>
+    </Teleport>
 
     <!-- ═══ Settings modal ═══ -->
     <Teleport to="body">
@@ -235,7 +238,6 @@ import ScriptTimelinePanel from '../components/ScriptTimelinePanel.vue';
 import AnalysisResultPanel from '../components/AnalysisResultPanel.vue';
 import VideoMetaPanel from '../components/VideoMetaPanel.vue';
 import TemplatePanel from '../components/TemplatePanel.vue';
-import GenerationPreview from '../components/GenerationPreview.vue';
 import MigrationStatusBar from '../components/MigrationStatusBar.vue';
 import ApiSettingsPanelStatic from '../components/ApiSettingsPanelStatic.vue';
 import type { ScriptModule } from '../components/ScriptTimelinePanel.vue';
@@ -304,29 +306,154 @@ function formatBlockTime(b: { start_time?: number; duration?: number }): string 
   return `${start.toFixed(1)}-${(start + dur).toFixed(1)}s`;
 }
 
+// ── Blueprint drag-and-drop ──
+let _bpDragIdx = -1;
+function onBlueprintDragStart(i: number, e: DragEvent) {
+  _bpDragIdx = i;
+  e.dataTransfer!.effectAllowed = 'move';
+}
+function onBlueprintDragOver(i: number, _e: DragEvent) {
+  if (_bpDragIdx < 0 || _bpDragIdx === i) return;
+  if (!blueprint.value) return;
+  const blocks = [...blueprint.value.blocks];
+  const [moved] = blocks.splice(_bpDragIdx, 1);
+  blocks.splice(i, 0, moved);
+  let cursor = 0;
+  for (const b of blocks) {
+    b.start_time = Math.round(cursor * 100) / 100;
+    cursor += b.duration;
+  }
+  blueprint.value = { ...blueprint.value, blocks };
+  _bpDragIdx = i;
+  // Sync material slots + gen preview
+  syncBlueprintToSlots();
+}
+function onBlueprintDragEnd() { _bpDragIdx = -1; }
+function onBlueprintDrop(_i: number, _e: DragEvent) { /* handled by dragOver */ }
+function syncBlueprintToSlots() {
+  if (!blueprint.value) return;
+  materialSlots.value = blueprint.value.blocks.map((b: any, i: number) => ({
+    id: `bp-${i}`, label: b.name,
+    file: b.status === 'matched' ? { filename: '(复用原视频)' } : (materialSlots.value[i]?.file || null),
+  }));
+  genSlots.value = blueprint.value.blocks.map((b: any, i: number) => ({
+    name: b.name, startPercent: i * (100 / blueprint.value!.blocks.length),
+    widthPercent: 100 / blueprint.value!.blocks.length,
+    status: b.status === 'matched' ? ('filled' as const) : ('gap' as const),
+  }));
+}
+
 async function onMigrate() {
-  if (!templateSelected.value || !project.videoId) return;
+function buildFallbackBlueprint(templateType: string): BlueprintResult | null {
+  const presets: Record<string, { name: string; key: string; dur: number; required: boolean }[]> = {
+    product_review: [
+      { name: '片头引语', key: 'opening_intro', dur: 3, required: false },
+      { name: '开箱展示', key: 'unboxing', dur: 5, required: false },
+      { name: '产品特写', key: 'product_closeup', dur: 6, required: true },
+      { name: '使用场景', key: 'usage_scene', dur: 6, required: false },
+      { name: '效果对比', key: 'comparison', dur: 4, required: true },
+      { name: '优缺点总结', key: 'pros_cons', dur: 4, required: false },
+      { name: 'CTA', key: 'cta', dur: 3, required: false },
+    ],
+    shopping_live: [
+      { name: '痛点引入', key: 'pain_point', dur: 3, required: false },
+      { name: '商品特写', key: 'product_closeup', dur: 6, required: true },
+      { name: '卖点口播', key: 'selling_points', dur: 8, required: true },
+      { name: '使用演示', key: 'demo', dur: 6, required: false },
+      { name: '价格锚点', key: 'price_anchor', dur: 2, required: false },
+      { name: '限时福利', key: 'urgency', dur: 2, required: false },
+      { name: 'CTA', key: 'cta', dur: 3, required: false },
+    ],
+    talking_head: [
+      { name: '话题引入', key: 'topic_intro', dur: 3, required: false },
+      { name: '长时解说', key: 'long_speech', dur: 15, required: true },
+      { name: '观点展开', key: 'viewpoint', dur: 5, required: false },
+      { name: '案例佐证', key: 'case_study', dur: 5, required: false },
+      { name: '金句收尾', key: 'quote_ending', dur: 3, required: false },
+      { name: 'CTA', key: 'cta', dur: 3, required: false },
+    ],
+    mashup: [
+      { name: '节奏引爆', key: 'rhythm_opener', dur: 2, required: false },
+      { name: '画面冲击A', key: 'impact_a', dur: 4, required: true },
+      { name: '内容过渡', key: 'bridge', dur: 2, required: false },
+      { name: '画面冲击B', key: 'impact_b', dur: 4, required: true },
+      { name: '情绪堆叠', key: 'emotion_build', dur: 4, required: false },
+      { name: '高潮爆发', key: 'climax', dur: 4, required: true },
+      { name: 'CTA', key: 'cta', dur: 2, required: false },
+    ],
+  };
+  const preset = presets[templateType];
+  if (!preset) return null;
+  let cursor = 0;
+  const blocks = preset.map(p => {
+    const start = cursor; cursor += p.dur;
+    return {
+      name: p.name, template_key: p.key,
+      start_time: Math.round(start * 100) / 100,
+      duration: p.dur, status: 'missing' as const,
+      required: p.required,
+    };
+  });
+  return {
+    template: { type: templateType, label: selectedTemplateName.value || templateType },
+    blocks,
+    summary: {
+      block_count: blocks.length, total_duration: cursor,
+      matched: 0, missing: blocks.length, passthrough: 0,
+      required_missing: blocks.filter(b => b.required).map(b => b.name),
+    },
+  };
+}
+
   const type = TEMPLATE_ID_MAP[selectedTemplateName.value] || 'none';
   blueprintLoading.value = true;
   blueprint.value = null;
   try {
-    const base = project.apiBaseUrl.replace(/\/+$/, '');
-    const res = await fetch(`${base}/export/blueprint`, {
-      method: 'POST', headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ template_type: type, job_id: project.videoId }),
-    });
-    if (!res.ok) throw new Error(`HTTP ${res.status}`);
-    blueprint.value = await res.json();
-    if (!blueprint.value?.blocks || blueprint.value.blocks.length === 0) {
-      showToast('分析结果尚未就绪，请先完成分析');
+    // ── Attempt backend merge ──
+    let bpResult: BlueprintResult | null = null;
+    if (project.videoId && project.analysisStatus === 'completed') {
+      try {
+        const base = project.apiBaseUrl.replace(/\/+$/, '');
+        const res = await fetch(`${base}/export/blueprint`, {
+          method: 'POST', headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ template_type: type, job_id: project.videoId }),
+        });
+        if (res.ok) {
+          const data = await res.json();
+          if (data?.blocks?.length && data.summary?.block_count) {
+            bpResult = data;
+          }
+        }
+      } catch { /* backend unreachable → fallback */ }
+    }
+
+    // ── Fallback: generate from template preset alone ──
+    if (!bpResult) {
+      bpResult = buildFallbackBlueprint(type);
+      showToast(bpResult ? '使用模板预设生成蓝图（未连接后端分析数据）' : '蓝图生成失败');
+    }
+
+    if (!bpResult || !bpResult.blocks.length) {
       blueprint.value = null;
       return;
     }
+
+    blueprint.value = bpResult;
+    materialSlots.value = bpResult.blocks.map((b: any, i: number) => ({
+      id: `bp-${i}`, label: b.name,
+      file: b.status === 'matched' ? { filename: '(复用原视频)' } : null,
+    }));
+    genSlots.value = bpResult.blocks.map((b: any, i: number) => ({
+      name: b.name, startPercent: i * (100 / bpResult!.blocks.length),
+      widthPercent: 100 / bpResult!.blocks.length,
+      status: b.status === 'matched' ? ('filled' as const) : ('gap' as const),
+    }));
+    showToast(`蓝图已生成：${bpResult.summary.block_count} 模块，${bpResult.summary.matched} 已匹配`);
     migrationSteps.value[2].done = true;
     migrationSteps.value[3].done = false;
   } catch (e) {
-    showToast('结构迁移失败: ' + ((e as any)?.message || '请检查后端是否运行'));
-    console.warn('Blueprint merge failed:', e);
+    showToast('蓝图生成失败: ' + ((e as any)?.message || ''));
+    blueprint.value = null;
   }
   finally { blueprintLoading.value = false; }
 }
@@ -488,16 +615,13 @@ function onSeek(time: number) {
 // ── Material grid: driven by creative_pattern ──
 
 
-// ── Material slots ──
-const materialSlots = computed(() => {
-  const count = analysisModules.value.length || 5;
-  return Array.from({ length: count }, (_, i) => ({
-    id: String(i + 1),
-    label: `槽位 ${i + 1}`,
-    file: null as File | null,
-    tags: [] as string[],
-  }));
-});
+// ── Gen slots (for blueprint sync) ──
+const genSlots = ref<Array<{ name: string; startPercent: number; widthPercent: number; status: 'filled' | 'gap' | 'fallback' }>>([]);
+
+// ── Material slots (writable, populated by blueprint) ──
+const materialSlots = ref<Array<{ id: string; label: string; file: { filename: string } | null }>>(
+  Array.from({ length: 5 }, (_, i) => ({ id: String(i + 1), label: `槽位 ${i + 1}`, file: null }))
+);
 const filledSlotCount = computed(() => materialSlots.value.filter(s => s.file).length);
 
 // ── Generation preview slots (derived from analysisModules) ──
@@ -763,9 +887,11 @@ function onPreviewUpload(file: File) {
 .blueprint-block {
   display: flex; flex-direction: column; align-items: center; justify-content: center;
   min-width: 60px; border-radius: var(--radius-sm); padding: 4px 8px;
-  border: 1px solid var(--border); gap: 2px; flex-shrink: 0;
+  border: 1px solid var(--border); gap: 2px; flex-shrink: 0; position: relative;
 }
 .blueprint-block--matched { border-color: #1a7f37; background: #1a7f3710; }
+.blueprint-block__drag { font-size: 10px; color: var(--text-muted); cursor: grab; line-height: 1; position: absolute; left: 2px; top: 2px; }
+.blueprint-block__drag:active { cursor: grabbing; }
 .blueprint-block--missing { border-color: #da3633; background: #da363310; border-style: dashed; }
 .blueprint-block--passthrough { border-color: var(--text-muted); background: var(--bg-surface); }
 .blueprint-block__name { font-size: 11px; font-weight: 600; color: var(--text-primary); white-space: nowrap; }

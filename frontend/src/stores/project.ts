@@ -119,9 +119,6 @@ export const useProjectStore = defineStore('project', () => {
     fps: 30, resolution: { width: 1920, height: 1080 }, tags: [],
   });
   const apiBaseUrl = ref(loadPersisted('apiBaseUrl', 'http://localhost:8000'));
-  const llmApiKey = ref(loadPersisted('llmApiKey', ''));
-  const llmApiUrl = ref(loadPersisted('llmApiUrl', ''));
-  const modelName = ref(loadPersisted('modelName', 'qwen-vl-max'));
   const errorMessage = ref<string | null>(null);
 
   function setMetadata(m: Partial<Metadata>) { metadata.value = { ...metadata.value, ...m }; }
@@ -152,9 +149,6 @@ export const useProjectStore = defineStore('project', () => {
 
   // ── Other setters ──
   function setApiBaseUrl(u: string) { apiBaseUrl.value = u; persist('apiBaseUrl', u); }
-  function setLlmApiKey(k: string) { llmApiKey.value = k; persist('llmApiKey', k); }
-  function setLlmApiUrl(u: string) { llmApiUrl.value = u; persist('llmApiUrl', u); }
-  function setModelName(n: string) { modelName.value = n; persist('modelName', n); }
   function setError(m: string | null) { errorMessage.value = m; }
   function resetProject() {
     videoId.value = null;
@@ -179,19 +173,17 @@ export const useProjectStore = defineStore('project', () => {
   let _w = false;
   function wire() { if (_w) return; _w = true;
     watch(apiBaseUrl, v => persist('apiBaseUrl', v));
-    watch(llmApiKey, v => persist('llmApiKey', v));
-    watch(llmApiUrl, v => persist('llmApiUrl', v));
-    watch(modelName, v => persist('modelName', v));
+
   }
   wire();
 
   return {
     metadata, videoId, uploadStatus, analysisStatus, exportStatus,
-    apiBaseUrl, llmApiKey, llmApiUrl, modelName, errorMessage,
+    apiBaseUrl, errorMessage,
     resetProject,
     setMetadata, setVideoId,
     setUploadStatus, setAnalysisStatus, setExportStatus,
-    setApiBaseUrl, setLlmApiKey, setLlmApiUrl, setModelName,
+    setApiBaseUrl,
     setError, clearError,
   };
 });

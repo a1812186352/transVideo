@@ -28,7 +28,7 @@ router = APIRouter(prefix="/export", tags=["export"])
 
 # ── Paths ──
 
-OUTPUT_DIR = os.path.join(os.path.dirname(__file__), "..", "..", "output")
+OUTPUT_DIR = os.path.join(os.path.dirname(__file__), "..", "..", "instances")
 BASE_DIR = os.path.join(os.path.dirname(__file__), "..", "..")
 
 # ── Persisted job store (SQLite-backed, survives restarts) ──
@@ -54,6 +54,8 @@ async def _run_export(video_id: str, script: MigratableScript) -> None:
     try:
         os.makedirs(OUTPUT_DIR, exist_ok=True)
         output_path = os.path.join(OUTPUT_DIR, f"{video_id}_output.mp4")
+        # Map source paths under instances/ (materials, source videos, etc.)
+        _ensure_source_material(script_data, OUTPUT_DIR)
 
         script_data = script if isinstance(script, dict) else script.model_dump()
         metadata = script_data.get("metadata", {})
@@ -291,6 +293,30 @@ def _push_progress(video_id: str, pct: int, stage: str, eta: int) -> None:
         q.put_nowait((pct, stage, eta))
     except asyncio.QueueFull:
         pass  # drop update if queue is full
+
+
+def _ensure_source_material(script: dict, instances_dir: str) -> None:
+    """Walk all modules and ensure source paths resolve correctly.
+
+    For each ``video_segment`` module:
+      - If ``source.path`` references a material file under
+        ``instances/materials/``, verify it exists.
+      - If missing or empty, leave it empty (the render engine
+        will generate a coloured placeholder).
+
+    This is a no-op guard — the render engine handles missing
+    sources gracefully per individual clip.
+    """
+    for mod in script.get("modules", []):
+        if mod.get("type") != "video_segment":
+            continue
+        src = mod.get("source") or {}
+        path = src.get("path", "")
+        if path and not os.path.isfile(path):
+            logger.warning(f"Source not found for module {mod.get('id')}: {path}")
+
+
+# ── Blueprint endpoint (kept for backward compat) ──
 
 
 # ═══════════════════════════════════════════════════════════════════

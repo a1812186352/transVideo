@@ -176,10 +176,6 @@ def build_module_tree(
         elif seg_type == "closing":
             modules.append({
                 **base, "track_index": 0, "type": "video_segment",
-            })
-            modules.append({
-                **base, "track_index": 3, "type": "effect",
-                "label": f"{seg_label}_outro",
                 "params": {"transition_type": "fade_out"},
             })
         else:
@@ -190,7 +186,15 @@ def build_module_tree(
     # ── Dedup: merge redundant video_segment + effect pairs ──
     modules = deduplicate_modules(modules)
 
-    # ── ModuleDescriber: synthesise human-readable descriptions ──
+    # ── ModuleNormalizer: remove overlaps + fill gaps (runs first) ──
+    try:
+        from understanding.deconstruction.module_normalizer import normalize
+        modules = normalize(modules, total_duration=dur_total)
+    except Exception as exc:
+        import logging
+        logging.getLogger(__name__).warning("Module normalizer failed: %s", exc)
+
+    # ── ModuleDescriber: runs AFTER normalize so all modules get labels ──
     try:
         from understanding.deconstruction.module_describer import describe
         for i, mod in enumerate(modules):
@@ -203,14 +207,6 @@ def build_module_tree(
     except Exception as exc:
         import logging
         logging.getLogger(__name__).warning("Module describer failed: %s", exc)
-
-    # ── ModuleNormalizer: remove overlaps + fill gaps + describe content ──
-    try:
-        from understanding.deconstruction.module_normalizer import normalize
-        modules = normalize(modules, total_duration=dur_total)
-    except Exception as exc:
-        import logging
-        logging.getLogger(__name__).warning("Module normalizer failed: %s", exc)
 
     return modules
 

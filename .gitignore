@@ -2,6 +2,10 @@
 __pycache__/
 *.pyc
 *.pyo
+*.egg-info/
+.pytest_cache/
+.ruff_cache/
+.mypy_cache/
 
 # Node
 node_modules/
@@ -9,7 +13,6 @@ dist/
 
 # Runtime generated data
 job_store/
-output/
 instances/*.mov
 instances/*.mp4
 instances/frames/
@@ -21,9 +24,11 @@ instances/.mp4/
 *.db-wal
 
 # Downloaded ML models
-yolov8n.pt
 *.pt
-understanding/models/
+yolov8n.pt
+
+# Logs
+logs/
 
 # IDE / Editor
 .vscode/
@@ -36,12 +41,6 @@ understanding/models/
 Thumbs.db
 Desktop.ini
 
-# Agent / Tool config logs
+# Agent config logs
 .reasonix/
-
-# Test artifacts
-.pytest_cache/
-
-# Log files
-logs/
 crash_dumps/

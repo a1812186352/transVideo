@@ -75,60 +75,13 @@ _MODULE_TYPE_LABEL = {
 
 
 def _resolve_label(detail: dict, seg_type: str, index: int, total_count: int) -> str:
-    """Resolve semantic label from sub_type → scene_tags → motion → position fallback.
-
-    Full 11-label priority chain:
-        1. Position: index==0 → do not auto-label "开头"; let sub_type decide
-        2. Last segment → position override → "品牌露出"
-        3. CONTENT_LABEL_MAP[sub_type] (Chinese key)
-        4. _SUB_TYPE_MAP[sub_type] (English key)
-        5. SCENE_TAG_MAP[scene_tags[0]]
-        6. Sub_type already Chinese → return as-is
-        7. MOTION_LABEL_RULES
-        8. Seg_type → module type label fallback
-    """
-    sub_type = detail.get("sub_type", "")
-
-    # ── 1. Last segment → brand reveal ──
-    if index >= total_count - 1:
-        return "品牌露出"
-
-    # ── 2. CONTENT_LABEL_MAP lookup (supports both Chinese keys like "标题卡") ──
-    if sub_type:
-        label = CONTENT_LABEL_MAP.get(sub_type)
-        if label:
-            return label
-
-    # ── 3. _SUB_TYPE_MAP (English key → Chinese label) ──
-    if sub_type and sub_type in _SUB_TYPE_MAP:
-        return _SUB_TYPE_MAP[sub_type]
-
-    # ── 4. SCENE_TAG_MAP from scene_tags[0] ──
-    scene_tags = detail.get("scene_tags") or []
-    if scene_tags:
-        tag = scene_tags[0]
-        label = SCENE_TAG_MAP.get(tag)
-        if label:
-            return label
-
-    # ── 5. Sub_type already Chinese → return as-is ──
-    if sub_type and any("\u4e00" <= c <= "\u9fff" for c in sub_type):
-        return sub_type
-
-    # ── 6. MOTION_LABEL_RULES ──
-    motion = detail.get("motion", "")
-    if motion:
-        motion_norm = motion.replace("｜", " ").replace("·", " ").replace("|", " ")
-        for pred, label in MOTION_LABEL_RULES:
-            if pred(motion_norm):
-                return label
-
-    # ── 7. Position fallback ──
+    """6-label system: 开头/高潮/转场/特效/内容/结尾."""
     if index == 0:
         return "开头"
-    label = _MODULE_TYPE_LABEL.get(seg_type)
-    if label:
-        return label
+    if index >= total_count - 1:
+        return "结尾"
+    return _MODULE_TYPE_LABEL.get(seg_type, "内容")
+
     return "内容"
 
 

@@ -1,177 +1,112 @@
 # transVideo
 
-> **Video Structure Decomposition → Migratable Script → Personalized Generation**
+视频结构拆解 → 可迁移脚本 → 个性化生成
 
-transVideo is a full-stack video analysis and re-generation platform. Upload a video, let the local pipeline analyze its structure (scenes, audio, text, visual features), edit the result in a Vue 3 timeline workbench, and export a new MP4 — all **offline**, no external API keys required.
-
-![Tech Stack](https://img.shields.io/badge/backend-FastAPI-009688?style=flat-square)
-![Tech Stack](https://img.shields.io/badge/frontend-Vue_3%20%2F%20Pinia-4FC08D?style=flat-square)
-![Tech Stack](https://img.shields.io/badge/analysis-OpenCV%20%2F%20Whisper%20%2F%20Librosa-2196F3?style=flat-square)
-![License](https://img.shields.io/badge/license-MIT-blue?style=flat-square)
+**纯本地运行，不依赖任何外部 API Key。** 信号采集、帧筛选、结构推理全部在本地完成。
 
 ---
 
-## Architecture
+## 项目说明
+
+transVideo 是一个视频叙事结构理解工具：输入任意视频，系统自动拆解其叙事结构，产出可迁移脚本（JSON），用户可在前端拖拽编辑模块后重新生成个性化视频。
+
+五层流水线：
 
 ```
-Input Video
+输入视频
   │
-  ├─ [Signal Layer · Local]
-  │   OpenCV Frame Diff + PySceneDetect Scene Boundaries
-  │   Whisper (small) Transcription + Librosa Beat/Energy/Silence
-  │   Tesseract OCR Text Extraction + OpenCV Frame Extraction
-  │   → Outputs: diff matrix, scene boundaries, speech timeline, text regions
+  ├─[信号层] ─── OpenCV 帧差 + PySceneDetect 场景边界
+  │               Whisper 转录 + Librosa 音频分析
+  │               Tesseract OCR + OpenCV 帧提取
   │
-  ├─ [Filter Layer · Local]
-  │   Adaptive Sampling: frame diff exceeds threshold → keyframe capture
-  │   IoU fusion with scene boundaries → final keyframe list
-  │   → Outputs: filtered keyframes with timestamps and signal context
+  ├─[筛选层] ─── 自适应采样（百分位阈值 + 场景边界捕获）
   │
-  ├─ [Understanding Layer · Local]
-  │   Rule Engine: 5-type sliding-window classifier
-  │   (Opening / Highlight / Transition / Effect / Closing)
-  │   + Visual Features (face/optical flow/saturation/edge density)
-  │   + OCR signals + speech duration inference
-  │   → Outputs: structured module tree with scene labels, emotion, BGM type
+  ├─[理解层] ─── 5 类型滑窗规则引擎（Opening / Highlight /
+  │               Transition / Effect / Closing）
+  │               + YOLOv8 物体检测（可选）
+  │               + 视觉特征（人脸/光流/饱和度/边缘密度）
   │
-  ├─ [Orchestration Layer · User Edits]
-  │   Vue 3 dual-view workbench → drag & drop modules on timeline
-  │   → Outputs: Migratable Script (JSON)
+  ├─[编排层] ─── Vue 3 前端双通道工作台 + 拖拽时间轴
   │
-  └─ [Generation Layer · Local]
-     HyperFrames HTML rendering → FFmpeg transcode/subtitle burn/concat
-     → Outputs: MP4
+  └─[生成层] ─── HyperFrames HTML 渲染 → FFmpeg 转码/字幕/拼接
 ```
 
----
+## 整体 AI 架构
 
-## Quick Start
+### 全本地推理管线（无外部依赖）
 
-### Prerequisites
+| 模块 | 模型/算法 | 本地/云端 | 必需 |
+|------|-----------|-----------|------|
+| 帧差分析 | HSV 直方图卡方距离 | 本地（OpenCV） | ✅ |
+| 场景检测 | PySceneDetect ContentDetector | 本地（OpenCV） | ✅ |
+| 语音转写 | Whisper small | 本地（~2GB） | ⬜ |
+| 音频分析 | Librosa BPM + RMS 能量 | 本地（~80MB） | ⬜ |
+| 文字识别 | Tesseract OCR | 本地（~50MB） | ⬜ |
+| 物体检测 | YOLOv8n | 本地（~6MB） | ⬜ |
+| 视觉特征 | Haar 级联 + Farneback 光流 | 本地（OpenCV） | ✅ |
+| 结构推理 | 规则引擎（5 类型滑窗分类器） | 本地（纯 Python） | ✅ |
 
-| Component | Required? | Notes |
-|-----------|-----------|-------|
-| Python 3.11+ | ✅ Required | Core runtime |
-| Node.js 18+ | ✅ Required | Frontend build |
-| FFmpeg | ✅ Required | Video/Audio processing |
-| Tesseract OCR | ⬜ Optional | Text detection (skip if absent) |
+### 最小可用配置
+仅需 `opencv-python` + `scenedetect`（~90MB），即可完成帧差分析、场景检测和结构推理。
 
-### Install Dependencies
+## 工具协议
 
-```bash
-# Minimal install (frame diff + scene detection + structure inference)
-pip install opencv-python scenedetect
+### API 端点
 
-# Full local install (speech + audio + OCR)
-pip install opencv-python scenedetect openai-whisper librosa pytesseract
+| 方法 | 路径 | 说明 |
+|------|------|------|
+| GET | `/` | 健康检查 |
+| POST | `/upload/` | 上传视频文件 |
+| GET | `/upload/video/{id}` | 获取视频流（byte-range 支持） |
+| GET | `/upload/video/{id}/thumbnail?time=N` | 单帧缩略图（JPEG） |
+| GET | `/upload/video/{id}/thumbnails?interval=N` | 批量缩略图列表 |
+| POST | `/analyze/{id}` | 启动视频分析 |
+| GET | `/analyze/{id}` | 查询分析状态 |
+| GET | `/analyze/{id}/stream` | SSE 实时分析进度 |
+| POST | `/export/{id}` | 启动视频导出 |
+| GET | `/export/{id}` | 查询导出状态 |
+| POST | `/materials/upload` | 上传素材（图片/视频） |
+| GET | `/materials/list` | 列出素材 |
+| DELETE | `/materials/{id}` | 删除素材 |
 
-# Backend API server
-pip install fastapi uvicorn httpx aiofiles
-
-# Frontend
-cd frontend && npm install
-```
-
-### Run
-
-```bash
-# Terminal 1 — Start backend
-uvicorn backend.main:app --reload --port 8000
-
-# Terminal 2 — Start frontend dev server
-cd frontend && npm run dev
-```
-
-Open **http://localhost:5173** in your browser. Upload a video → click "Analyze" → inspect results → edit the script on the timeline → export MP4.
-
-### API Settings
-
-Configure the backend URL in the ⚙ Settings panel (default: `http://localhost:8000`).
-
----
-
-## Module Overview
-
-| Module | Layer | Responsibility | Dependencies |
-|--------|-------|---------------|--------------|
-| `understanding/signal/` | Signal (local) | Frame diff, scene detection, speech transcription, audio analysis, OCR, frame extraction | OpenCV / PySceneDetect / Whisper / Librosa / Tesseract |
-| `understanding/filter/` | Filter (local) | Adaptive keyframe sampling (percentile threshold, density, boundary forcing) | Pure Python |
-| `understanding/understand/` | Understanding (local) | Rule-engine 5-type sliding-window structure inference + visual features (face/optical flow/YOLO) | OpenCV (optional ultralytics) |
-| `backend/` | Application | FastAPI server, pipeline orchestration, SSE real-time push, JobStore persistence | FastAPI + uvicorn |
-| `frontend/` | Application | Vue 3 dual-view workbench, drag & drop timeline, inspector panel, monitor panel | Vite + Vue 3 + Pinia |
-| `generation/` | Generation | HyperFrames HTML template rendering + FFmpeg fallback dual path | FFmpeg |
-| `processing/` | Generation | FFmpeg transcoding, subtitle burn-in, concatenation, crossfade (xfade) | FFmpeg |
-
-### Optional Dependencies
-
-| Component | Package | Size | Required? |
-|-----------|---------|------|-----------|
-| Frame diff + extraction | opencv-python | ~90 MB | ✅ Yes |
-| Scene detection | scenedetect | ~1 MB | ✅ Yes |
-| Speech transcription | openai-whisper + torch | ~2 GB | ⬜ Optional |
-| Audio analysis | librosa | ~80 MB | ⬜ Optional |
-| Audio extraction | ffmpeg | ~100 MB | ⬜ Optional |
-| OCR | pytesseract + Tesseract | ~50 MB | ⬜ Optional |
-| Visual features + YOLO | ultralytics | ~200 MB | ⬜ Optional |
-
-**Minimum usable config**: opencv-python + scenedetect (~90 MB) — enables frame diff, scene detection, and structure inference.
-
----
-
-## Technical Decisions
-
-| Decision | Choice | Rationale |
-|----------|--------|-----------|
-| Script format | Custom JSON Schema (Pydantic + jsonschema) | Dual-source validation serving both API and Python layers |
-| Structure inference | 5-type sliding-window rule engine | Zero API dependency, fully local |
-| Render engine | HyperFrames HTML → FFmpeg fallback | Reduces hard dependency on external CLI |
-| Frontend framework | Vue 3 + Pinia + TypeScript | Lightweight, reactive, multi-track timeline ready |
-| OCR engine | Tesseract (offline) | Lightweight, no GPU needed |
-| Visual features | OpenCV Haar + optical flow + YOLO (optional) | Zero-model startup, graceful YOLO degradation |
-| Task persistence | SQLite (JobStore) | Zero dependency, survives process restart |
-| Progress push | SSE (Server-Sent Events) | Real-time pipeline progress to frontend monitor |
-| Component loading | Full lazy loading + independent degradation | Any single component missing won't block the rest |
-| Audio processing | ffmpeg extract → librosa analyze | Avoids librosa hanging on direct video input |
-
----
-
-## Development
-
-### Code Style
-
-```bash
-# Python — ruff
-ruff check backend/ understanding/ generation/ processing/
-
-# TypeScript/Vue — biome
-cd frontend && npx biome check src/
-```
-
-See [CODE_STYLE.md](docs/CODE_STYLE.md) for full rules.
-
-### Project Structure
+### 数据流
 
 ```
-transVideo/
-├── backend/           # FastAPI server (routers, models, store)
-├── frontend/          # Vue 3 + Vite SPA
-│   └── src/
-│       ├── components/   # TimelineBar, PreviewPanel, etc.
-│       ├── stores/       # Pinia (project, workbench)
-│       ├── types/        # TypeScript types
-│       └── views/        # Workbench.vue
-├── understanding/     # Video analysis pipeline
-│   ├── signal/           # Frame diff, scene detect, OCR, audio
-│   ├── filter/           # Adaptive keyframe sampling
-│   └── understand/       # Structure inference
-├── generation/        # HyperFrames HTML + FFmpeg render
-├── processing/        # FFmpeg transcoding, subtitles, concat
-├── docs/              # Documentation
-└── tests/             # Test suite
+上传 → 分析（信号 → 筛选 → 理解 → 模块树）→ 脚本 JSON
+  → 前端编辑 → 导出（HTML → FFmpeg MP4）
 ```
 
----
+### 状态码约定
 
-## License
+- `200` — 请求成功
+- `404` — 视频/资源不存在
+- `409` — 冲突（分析/导出正在处理中）
+- `413` — 文件超过大小限制
+- `422` — 请求参数校验失败
 
-MIT
+## 安全边界
+
+### 文件隔离
+- 上传视频存储在项目 `instances/` 目录，按 UUID 命名防碰撞
+- 素材上传限 50MB，仅允许图片和常见视频格式
+- 所有文件路径使用 `uuid` 生成，防止路径遍历
+
+### 无外部请求
+- 所有分析步骤 **不向外部发送任何 HTTP 请求**
+- 不收集任何用户数据、分析日志或视频内容
+- 不嵌入任何遥测、分析或广告 SDK
+
+### 依赖安全
+- 无运行时网络请求（pip 安装后完全离线可用）
+- FFmpeg 子进程通过 `shutil.which()` 查找，不信任 PATH 以外的路径
+- 所有子进程设置 `timeout` 防止资源耗尽
+
+### 数据生命期
+- 分析中间产物存储在 `job_store/`（SQLite + JSON），进程重启可恢复
+- 临时帧缓存存储在 `instances/frames/`，可随时删除
+- 日志文件 10MB 轮转，保留 5 个备份
+
+### 风险提示
+- Whisper 模型下载约 2GB，YOLOv8n 约 6MB，首次运行需联网下载
+- 长视频（>30 分钟）分析耗时可能超过 30 分钟（CPU 推理）
+- 前端设置的 API 地址仅用于连接本机后端，不传输至第三方
